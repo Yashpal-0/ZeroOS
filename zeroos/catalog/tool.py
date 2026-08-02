@@ -15,6 +15,29 @@ import inspect
 
 _JSON_TYPES = {str: "string", int: "integer", float: "number", bool: "boolean"}
 
+# Returned when a tool fails in a way the function's own handler didn't catch
+# — a bug, or a consent-gate malfunction. Deliberately generic: the agent loop
+# must learn only that the action did not happen, never crash details. The
+# traceback goes to the action log (Task 11) for us, not to the model.
+_UNEXPECTED = "That didn't work."
+
+
+def _matches_json_type(value, json_type: str) -> bool:
+    """True if a Python value fits the declared JSON Schema type.
+
+    bool is a subclass of int in Python, so it is rejected for the numeric
+    types — JSON Schema treats integer and boolean as distinct.
+    """
+    if json_type == "string":
+        return isinstance(value, str)
+    if json_type == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if json_type == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if json_type == "boolean":
+        return isinstance(value, bool)
+    return True
+
 
 def _split_docstring(doc: str) -> tuple[str, dict[str, str]]:
     """Split a Google-style docstring into (description, {argument: description})."""
@@ -23,12 +46,20 @@ def _split_docstring(doc: str) -> tuple[str, dict[str, str]]:
     current: str | None = None
     in_args = False
 
-    for line in inspect.cleandoc(doc or "").splitlines():
-        line = line.strip()
+    for raw in inspect.cleandoc(doc or "").splitlines():
+        line = raw.strip()
         if line == "Args:":
             in_args = True
             continue
         if not in_args:
+            description.append(line)
+            continue
+        # Argument lines are indented. cleandoc has already stripped the common
+        # indent, so a non-empty line back at column 0 has left the Args block —
+        # trailing prose that belongs to the description, not to any argument.
+        if raw and not raw.startswith(" "):
+            in_args = False
+            current = None
             description.append(line)
             continue
         head, _, rest = line.partition(":")
@@ -73,14 +104,23 @@ class Tool:
         """Invoke with a dictionary. Never raises on a malformed call.
 
         The model writes these arguments, so a wrong shape is an expected
-        input, not a bug. Unknown keys are dropped and a missing required
-        argument comes back as a sentence the model can read and retry from.
+        input, not a bug. Unknown keys are dropped, a missing or wrong-typed
+        argument comes back as a sentence the model can read and retry from,
+        and any exception that still escapes the function becomes
+        "That didn't work." rather than killing the turn.
         """
-        accepted = {k: v for k, v in arguments.items() if k in self.input_schema["properties"]}
+        properties = self.input_schema["properties"]
+        accepted = {k: v for k, v in arguments.items() if k in properties}
         missing = [k for k in self.input_schema["required"] if k not in accepted]
         if missing:
             return f"That didn't work — {self.name} needs {', '.join(missing)}."
-        return self.func(**accepted)
+        bad = [k for k, v in accepted.items() if not _matches_json_type(v, properties[k]["type"])]
+        if bad:
+            return f"That didn't work — {self.name} got wrong types for {', '.join(bad)}."
+        try:
+            return self.func(**accepted)
+        except Exception:
+            return _UNEXPECTED
 
 
 # ponytail: the decorator is the class. @tool on a function returns a Tool.

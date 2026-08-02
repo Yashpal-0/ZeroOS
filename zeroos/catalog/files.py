@@ -12,13 +12,11 @@ the tool description it sees. They say what the tool does, what the arguments
 mean, and when not to use it.
 """
 
-from zeroos.catalog.tool import tool
+from zeroos.catalog.tool import _UNEXPECTED, tool
 
 from zeroos.platform import files as platform_files
 from zeroos.policy.gate import Verdict
 from zeroos.policy.sandbox import Refused, resolve
-
-_UNEXPECTED = "That didn't work."
 
 
 def _guard(gate, name, arguments):
