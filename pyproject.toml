@@ -18,3 +18,9 @@ include = ["zeroos*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# pytest's default tmp_path lives under /tmp, which is tmpfs on most desktops.
+# Gio.File.trash() refuses to trash on system internal mounts, so the tests that
+# prove ZeroOS moves files to the trash rather than deleting them — the product's
+# central promise — cannot run there. Keeping scratch files on the same real
+# filesystem as the repo lets them actually exercise it.
+addopts = "--basetemp=.pytest-tmp"
