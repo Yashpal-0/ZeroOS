@@ -131,8 +131,11 @@ class Gate:
         if tier is Tier.AUTO:
             return Verdict.ALLOW, ""
         answers = self._ask(describe.describe_batch([(name, resolved)]))
-        approved = bool(answers and answers[0])
-        verdict = Verdict.ALLOW if approved else Verdict.DENY
+        # Same contract, same loudness as prepare(). One row was shown, so one
+        # answer must come back; treating an absent answer as DENY would deny an
+        # action on behalf of a user whose dialog malfunctioned.
+        assert len(answers) == 1, "_ask must answer every row"
+        verdict = Verdict.ALLOW if answers[0] else Verdict.DENY
         return verdict, self._message(verdict)
 
     @staticmethod

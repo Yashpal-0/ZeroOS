@@ -22,6 +22,10 @@ class Asker:
     def __call__(self, rows):
         self.calls.append(list(rows))
         if isinstance(self.answer, list):
+            # A canned list that doesn't match the rows asked about makes this
+            # fixture lie: it would answer a row the gate never showed, or leave
+            # one unanswered, and the test would pass on a coincidence.
+            assert len(self.answer) == len(rows), "canned answers must match rows"
             return self.answer
         return [self.answer] * len(rows)
 
@@ -104,9 +108,20 @@ def test_a_short_answer_list_is_an_error_not_a_silent_denial(home):
     # The gate has no fallback for a missing answer on purpose: guessing DENY
     # would deny an action the user was never asked about. A dialog that
     # under-answers is a bug in the dialog and must be loud.
-    g = gate.Gate(Asker(answer=[]))
+    # Not the Asker fixture — it now refuses to under-answer, so it would raise
+    # its own assertion and the gate's would never be reached.
+    g = gate.Gate(lambda rows: [])
     with pytest.raises(AssertionError):
         g.prepare([("trash_file", {"path": str(home / "Downloads" / "a.iso")})])
+
+
+def test_an_unanswered_single_ask_is_an_error_not_a_silent_denial(home):
+    # decide()'s one-off ask carries the same contract as prepare()'s batch.
+    # A dialog that returns no answer is a broken dialog, not a rejection, and
+    # treating it as DENY would be exactly the silent denial spec 4.3 forbids.
+    g = gate.Gate(lambda rows: [])
+    with pytest.raises(AssertionError):
+        g.decide("trash_file", {"path": str(home / "Downloads" / "a.iso")})
 
 
 def test_unknown_tool_is_refused(home):
@@ -133,6 +148,26 @@ def test_collapsed_rows_still_map_to_individual_decisions(home):
     assert len(asker.calls[0]) == 1
     for _, args in calls:
         assert g.decide("move_file", args)[0] is gate.Verdict.ALLOW
+    # The verdicts alone do not prove the fan-out worked. A call the row failed
+    # to cover arrives at decide() unprepared, and decide() correctly re-asks —
+    # so it ends up ALLOWed anyway and the assertions above stay green. The
+    # dialog count is what distinguishes "covered by the row" from "asked twice".
+    assert len(asker.calls) == 1, "every call in the row was prepared; none may re-ask"
+
+
+def test_a_relative_path_prepared_is_the_same_call_when_decided(home):
+    # prepare() renders resolved paths but must key the ledger on the raw ones.
+    # If the two sides key differently, decide() will not recognise the call
+    # prepare() just asked about and will ask a second time. Every other
+    # prepare-then-decide test here uses absolute paths, where resolve() is a
+    # no-op and the mismatch cannot show itself.
+    asker = Asker(answer=True)
+    g = gate.Gate(asker)
+    args = {"path": "Downloads/a.iso"}
+    g.prepare([("trash_file", args)])
+    assert len(asker.calls) == 1
+    assert g.decide("trash_file", args)[0] is gate.Verdict.ALLOW
+    assert len(asker.calls) == 1, "decide must not re-ask what prepare already covered"
 
 
 def test_a_relative_path_still_shows_its_folder(home):
