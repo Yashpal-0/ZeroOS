@@ -26,8 +26,8 @@ def denied_roots() -> tuple[Path, ...]:
     return (
         h / ".ssh",
         h / ".gnupg",
-        h / ".config" / "ZeroOS",
-        h / ".local" / "share" / "ZeroOS",
+        paths.config_dir(),
+        paths.data_dir(),
         h / ".local" / "share" / "keyrings",
     )
 
@@ -50,14 +50,22 @@ def resolve(raw: str) -> Path:
     if not candidate.is_absolute():
         candidate = h / candidate
 
-    resolved = candidate.resolve()
+    try:
+        resolved = candidate.resolve()
+    except ValueError:
+        # e.g. an embedded null byte. Not a valid path either way.
+        raise Refused()
     home_resolved = h.resolve()
 
     if resolved != home_resolved and not resolved.is_relative_to(home_resolved):
         raise Refused()
 
     for denied in denied_roots():
-        denied = denied.resolve() if denied.exists() else denied
+        # Always resolve, even if the denied root doesn't exist yet: a
+        # symlinked home (or an intermediate symlink, e.g. a dotfile
+        # manager's ~/.local/share) must not let a missing ~/.ssh slip
+        # through unresolved and dodge the containment check below.
+        denied = denied.resolve()
         if resolved == denied or resolved.is_relative_to(denied):
             raise Refused()
 

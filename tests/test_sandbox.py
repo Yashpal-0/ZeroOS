@@ -82,3 +82,41 @@ def test_refusal_carries_the_user_facing_message(home):
     with pytest.raises(sandbox.Refused) as caught:
         sandbox.resolve("/etc/passwd")
     assert caught.value.message == sandbox.REFUSAL_MESSAGE
+
+
+def test_refuses_ssh_under_a_symlinked_home_before_ssh_is_created(tmp_path, monkeypatch):
+    # ~/.ssh does not exist yet. If a denied root that doesn't exist is
+    # left unresolved while a symlinked home is resolved, the two paths'
+    # prefixes no longer match and containment silently fails open.
+    real_home = tmp_path / "real_home"
+    real_home.mkdir()
+    home_link = tmp_path / "home_link"
+    home_link.symlink_to(real_home)
+    monkeypatch.setenv("ZEROOS_HOME", str(home_link))
+
+    with pytest.raises(sandbox.Refused):
+        sandbox.resolve(str(home_link / ".ssh" / "authorized_keys"))
+
+
+def test_refuses_the_action_log_under_a_relocated_xdg_data_home(tmp_path, monkeypatch):
+    # Same shape as above, but for the XDG-relocated data dir: the ZeroOS
+    # data directory doesn't exist yet, and XDG_DATA_HOME is itself a
+    # symlink, so the denylist must be derived from paths.data_dir() and
+    # resolved unconditionally to still catch it.
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("ZEROOS_HOME", str(home))
+
+    real_data = home / "real_data"
+    real_data.mkdir()
+    data_link = home / "xdg_data"
+    data_link.symlink_to(real_data)
+    monkeypatch.setenv("XDG_DATA_HOME", str(data_link))
+
+    with pytest.raises(sandbox.Refused):
+        sandbox.resolve(str(data_link / "ZeroOS" / "actions.log"))
+
+
+def test_refuses_a_null_byte_instead_of_raising(home):
+    with pytest.raises(sandbox.Refused):
+        sandbox.resolve("Documents/a\0b")
