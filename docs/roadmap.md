@@ -139,6 +139,9 @@ prompt every turn, and prompt tokens are the side that scales.
   someone else's budget the one being spent.
 - **Crash and error reporting.** Currently a local log file. Fine for dogfooding,
   insufficient once testers exist and cannot read it.
+- **Form of address is hardcoded.** The v0.1 system prompt addresses the user as "Sir",
+  which is right for a single-developer dogfooding build and wrong the moment anyone
+  else runs it. Make it a preference — with a neutral default — before testers exist.
 - **A written trust story.** "What can this app do to my files?" needs a plain-language
   answer on the project page, backed by the fact that the catalog is sixteen readable
   functions.
