@@ -259,9 +259,18 @@ permission gate then measures nothing.
 2. All `confirm`-tier calls in the turn are collected and presented in **one dialog**
    listing every pending action in plain language.
 3. The user picks: **Do all**, **Deny all**, or unticks individual rows and confirms
-   the rest.
+   the rest. Closing the dialog with Esc or the window button is the same answer as
+   **Deny all** — a dismissal is a decision, not an absence of one.
 4. Denied actions return `"The user declined this action."` as their tool result. The
    model sees the denial and adapts — it does not retry the same call.
+
+**Nothing is denied that was not asked about.** ZeroOS has no default verdict for a
+`confirm` action. It does not deny on doubt, on timeout, or because a call arrived by
+some path the batch did not cover — in every one of those cases it asks. A denial is
+always a record of the user rejecting something they were shown. The two outcomes that
+happen without a dialog are not denials and are not about trust: an unknown tool name
+and a path outside the sandbox are *refusals*, and neither is something the user could
+usefully approve.
 
 Here "turn" means **one model response**, not one user message. A request the model
 answers in several rounds — create a folder, look at what landed in it, then move
