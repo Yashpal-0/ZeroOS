@@ -37,7 +37,7 @@ it). It is recorded here so nobody re-litigates it later.
 | Reach | Local machine only. No OAuth, no third-party accounts, no server. |
 | Action model | Curated catalog. No raw shell, ever. |
 | OS | Linux desktop (GNOME-first; Wayland and X11). |
-| Model | `claude-opus-5` with adaptive thinking. |
+| Model | `qwen/qwen3.7-flash` via OpenRouter. |
 
 ### Non-goals for v0.1
 
@@ -56,7 +56,7 @@ reading the others.
 
 ```
 surface/     GTK4 chat window, onboarding, permission dialog
-agent/       Tool Runner session, system prompt, conversation state
+agent/       Model session loop, system prompt, conversation state
 policy/      Permission tiers, path sandbox, approval batching
 catalog/     The ~16 action functions
 platform/    Thin Linux wrappers: XDG portals, D-Bus, GIO, xdg-open
@@ -73,25 +73,44 @@ whatever approval callback it was constructed with, and waits. In the app that
 callback is the GTK dialog; in tests it is a function that returns a fixed answer.
 That is what makes the permission model testable without a display.
 
-### Why Tool Runner
+### Why OpenRouter and a hand-written loop
 
-The Claude API's Tool Runner (`client.beta.messages.tool_runner` in the `anthropic`
-Python SDK) supplies the agent loop — request, execute tools, feed results back,
-repeat — over **only the tools we define**. It has no built-in filesystem or shell
-access.
+The model is `qwen/qwen3.7-flash`, reached through OpenRouter's OpenAI-compatible
+`/chat/completions` endpoint using the `openai` Python SDK pointed at
+`https://openrouter.ai/api/v1`. The agent loop — request, execute tools, feed results
+back, repeat — is about forty lines we own, running over **only the tools we define**.
+There is no built-in filesystem or shell access because there is no vendor harness to
+supply one.
 
 That absence is the security property, not a limitation. Three alternatives were
 considered and rejected:
 
-- **Managed Agents** — Anthropic hosts the loop *and* a per-session sandbox. A remote
-  sandbox cannot touch the user's local machine, which is the entire product.
-- **Claude Agent SDK** — batteries-included Claude Code harness with built-in
-  Bash/Read/Write. Fastest to a demo, but it is a raw-shell agent wearing a permission
-  system. That is the model rejected in favour of a curated catalog, and it puts
-  `rm -rf` one confused approval away from a non-technical user.
-- **Manual loop** — hand-written `while stop_reason == "tool_use"`. More code owned
-  for no benefit; Tool Runner's per-turn hooks already provide the approval
-  interception we need.
+- **A vendor-specific harness** (Anthropic's Tool Runner, or any equivalent) — supplies
+  the loop, but couples the app to one provider's SDK and wire format. OpenRouter's
+  value is that the model is a config string; a provider-locked harness throws that
+  away to save forty lines.
+- **Hosted agent platforms** — the provider runs the loop *and* a remote sandbox. A
+  remote sandbox cannot touch the user's local machine, which is the entire product.
+- **A batteries-included coding-agent SDK** — built-in Bash/Read/Write. Fastest to a
+  demo, but it is a raw-shell agent wearing a permission system. That is the model
+  rejected in favour of a curated catalog, and it puts `rm -rf` one confused approval
+  away from a non-technical user.
+
+Owning the loop turns out to help the part of this design that is actually novel. A
+harness that yields per-turn forces an assumption about *when* it yields relative to
+executing tools; get that wrong and the batched approval dialog (§4.3) silently
+degrades into one dialog per action. With a hand-written loop the entire `tool_calls`
+array is in hand before anything runs, so batching is correct by construction rather
+than by hook ordering.
+
+This was verified against the live model before the design was fixed: a single
+create-folder-then-move-two-files request returned `finish_reason: "tool_calls"` with
+three tool calls in one response. Parallel tool calling is the mechanism the whole
+"control multiple things at once" premise rests on, and it works here.
+
+**Provider portability.** `policy/`, `catalog/`, and `platform/` never see a model, a
+message, or a request. Only `agent/session.py` knows the wire format. Changing model
+or provider is a change to that one file plus a config string.
 
 ### Why Python + GTK4
 
@@ -177,7 +196,7 @@ gap in that argument. Restricting them closes it.
 
 ### Tool descriptions are part of the design
 
-Each function's docstring becomes the tool description Claude reads. These are written
+Each function's docstring becomes the tool description the model reads. These are written
 for the model, not for developers: they state what the action does, what the arguments
 mean, and — critically — when *not* to use it. `move_file` says it cannot overwrite
 without confirmation; `search_files` says it searches the user's home directory only.
@@ -226,9 +245,9 @@ The denylist is checked *after* symlink resolution, so a symlink from
 
 ### 4.3 Batched approval — "control multiple things at once"
 
-Claude emits multiple `tool_use` blocks in a single turn. This is how ZeroOS controls
-several things at once, and it is close to free with Tool Runner. It also creates the
-one genuinely novel UX problem in v0.1.
+The model emits multiple entries in `tool_calls` in a single response. This is how
+ZeroOS controls several things at once — verified live on `qwen/qwen3.7-flash`, three
+calls in one response. It also creates the one genuinely novel UX problem in v0.1.
 
 The naive design shows one modal dialog per pending action. Ask a user to approve five
 dialogs in a row and by the third they are clicking Approve without reading. The
@@ -245,7 +264,7 @@ permission gate then measures nothing.
    model sees the denial and adapts — it does not retry the same call.
 
 Ordering: within a turn, approved `confirm` actions execute sequentially in the order
-Claude emitted them, because file operations can depend on each other (create the
+the model emitted them, because file operations can depend on each other (create the
 folder, then move files into it). `auto` actions have no such dependency and run in
 parallel.
 
@@ -275,10 +294,10 @@ lists past three items (with an expander); no jargon ("move" not "mv", "folder" 
 One turn, end to end:
 
 1. User types into the GTK window. Text goes to `agent/`.
-2. `agent/` appends it to conversation state and calls the Tool Runner with the system
+2. `agent/` appends it to conversation state and posts to OpenRouter with the system
    prompt, the catalog schemas, and the message history.
-3. Claude responds with text and/or one or more `tool_use` blocks.
-4. Before execution, `policy/` partitions the blocks by tier and runs the path
+3. The model responds with text and/or a `tool_calls` array.
+4. Before execution, `policy/` partitions the calls by tier and runs the path
    sandbox check on every path argument.
 5. `auto` calls execute concurrently. `confirm` calls are passed to `agent/`'s
    approval callback as a single batch; in the app that callback shows the dialog and
@@ -286,27 +305,39 @@ One turn, end to end:
 6. Approved calls execute sequentially through `catalog/`, which calls `platform/`.
 7. All results — successes, errors, denials, sandbox refusals — go back as tool
    results. The loop continues.
-8. When Claude stops requesting tools, the final text renders in the window.
+8. When `finish_reason` is no longer `"tool_calls"`, the final text renders in the
+   window.
 
 Conversation state is in-memory and per-session. Closing the window discards it. That
 is a v0.1 simplification, not a permanent decision — see the roadmap's memory phase.
 
-### Cost and caching
+### Model configuration and cost
 
-The system prompt plus sixteen tool schemas is a large, byte-identical prefix on every
-request. It is marked with `cache_control` so it is written once and read at roughly a
-tenth of input cost thereafter. Opus 5's minimum cacheable prefix is 512 tokens; the
-catalog schemas alone exceed that comfortably.
+| Setting | Value | Why |
+|---|---|---|
+| Model | `qwen/qwen3.7-flash` | Tool-capable, 1M context, cheapest tier that plans multi-step file work |
+| `max_tokens` | 4096 | A turn is a short reply plus a handful of tool calls. The model's ceiling is 65,536; nothing here needs it, and a low cap bounds a runaway loop |
+| `reasoning` | left at the model's default | The measured turn spent 256 reasoning tokens unprompted and planned correctly. No reason to pay to raise it or risk lowering it |
+| `tool_choice` | `"auto"` | The model must be free to answer without acting |
 
-Any change to the system prompt or any tool docstring invalidates the cache, since
-matching is by exact prefix. Practically this means a cache miss on the first request
-after an update, which is fine.
+Pricing is $0.03 per million prompt tokens and $0.13 per million completion tokens. The
+measured three-action turn used 400 prompt and 379 completion tokens: **$0.00006**.
+A heavy day of a hundred such turns is under a cent.
+
+**No prompt caching in v0.1.** The system prompt plus sixteen tool schemas is a large
+byte-identical prefix and is the textbook case for it, but the measured turn reported
+`cached_tokens: 0` and cost six thousandths of a cent. Optimizing that is work with no
+payoff. The usage block reports `cached_tokens` on every response; if conversations
+grow long enough for prompt size to matter, measure there first.
+
+This cost profile is the single biggest consequence of the model choice, and it changes
+the pre-launch billing gate in the roadmap — see §7.
 
 ---
 
 ## 6. Error Handling
 
-The governing rule: **catalog functions never raise into the Tool Runner.** Every
+The governing rule: **catalog functions never raise into the agent loop.** Every
 failure becomes a tool result string the model can read and act on.
 
 | Failure | Result |
@@ -336,18 +367,34 @@ actually do", which a non-technical user will ask the moment something surprises
 
 ## 7. API Key and Billing
 
-**v0.1 assumption:** the user supplies their own Anthropic API key during onboarding.
-It is stored in the system keyring via libsecret through the Secret Service portal —
-never in a config file, never in the conversation.
+**v0.1 assumption:** the user supplies their own OpenRouter API key. There are two ways
+the key reaches the app, and both are needed.
 
-This is honestly at odds with the non-technical target user. Someone who does not open
-a terminal will not casually obtain an API key. v0.1 accepts that: it is a dogfooding
-and early-tester release, and the alternative (a hosted proxy) contradicts the
-"local only, zero hosting" constraint that makes v0.1 buildable at all.
+| Path | Source | Who uses it |
+|---|---|---|
+| Development | `OPENROUTER_API_KEY` and `OPENROUTER_BASE_URL` from the environment | The developer, running from a checkout |
+| Shipped app | System keyring via libsecret through the Secret Service portal, entered during onboarding | Everyone else |
 
-Resolving this is a **named pre-launch gate**, not an open question — the three
-candidate shapes and their consequences are in the roadmap. v0.1 ships with
-bring-your-own-key and does not block on the decision.
+The environment path is checked first and skips onboarding entirely when set. This is
+not a convenience — a Flatpak runs in a sandbox that cannot read the developer's shell
+profile, so without the keyring path the shipped app has no key at all, and without the
+environment path dogfooding means retyping a key into a dialog. The key is never
+written to a config file and never enters the conversation.
+
+Startup validates the key with `GET /api/v1/key`, which returns the key's own limit and
+usage. A 401 routes into onboarding; a network failure shows the retry banner from §6
+and does not discard the key.
+
+**On billing.** The stated audience does not casually obtain an API key, so v0.1's
+bring-your-own-key is honestly a dogfooding and early-tester posture, not a shippable
+one. What the model choice changes is the *cost* of the alternative: at $0.00006 per
+turn, a hosted proxy absorbing usage for a hundred users at a hundred turns a day is
+under twenty cents a day. Proxying is no longer unaffordable — it is now purely an
+architectural objection, since a proxy contradicts the "local only, zero hosting"
+constraint that makes v0.1 buildable at all.
+
+That is a real gate and it stays a gate; the roadmap carries the three candidate shapes
+and their consequences. v0.1 ships bring-your-own-key and does not block on it.
 
 Onboarding therefore has to do real work: explain what a key is, link directly to the
 console page that creates one, validate it with a cheap call before accepting it, and

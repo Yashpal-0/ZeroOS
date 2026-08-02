@@ -25,4 +25,4 @@ delete a file.
 | Reach | Local machine only — no accounts, no server |
 | Actions | 16 curated functions. No shell. No permanent delete. |
 | Platform | Linux desktop (GNOME-first), shipped as a Flatpak |
-| Built with | Python, GTK4 + libadwaita, Claude API Tool Runner, `claude-opus-5` |
+| Built with | Python, GTK4 + libadwaita, `qwen/qwen3.7-flash` via OpenRouter |

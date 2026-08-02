@@ -44,9 +44,10 @@ Conversation persists across sessions. The agent remembers stated preferences
 ("my documents live in ~/Work") and prior context.
 
 Real problems to solve: what is remembered versus what is transcript, how the user
-inspects and deletes memory, and how memory affects the prompt cache prefix — a
-per-session-varying prefix defeats caching, so memory probably belongs *after* the
-cached block, not inside it.
+inspects and deletes memory, and what memory does to prompt size. v0.1 sends a fixed
+prefix and does not cache. Memory makes the prefix grow and vary per session, which is
+both the thing that raises cost and the thing that would defeat caching if it is ever
+added — so memory belongs *after* the fixed block, not inside it.
 
 ### v0.3 — MCP servers
 
@@ -54,9 +55,11 @@ Third-party reach without a bespoke integration for each service. MCP is already
 industry standard for this; building a proprietary tool-registry instead is the most
 likely way this project dies of maintenance.
 
-The design already accommodates it: the Python SDK's `anthropic.lib.tools.mcp` helpers
-convert a local MCP server's tools into the same Tool Runner the catalog uses. The
-curated catalog and the MCP ecosystem are not competing designs — same door.
+The design already accommodates it: an MCP server advertises tools as JSON Schema, which
+is the same shape `agent/` already sends for the catalog. Mounting a server means
+appending to the tools list and routing its calls to the server instead of a local
+function. The curated catalog and the MCP ecosystem are not competing designs — same
+door.
 
 Genuinely hard part, and the reason this is its own phase: MCP tools arrive with
 **unknown permission tiers**. The v0.1 model assigns tiers by hand at author time.
@@ -109,18 +112,31 @@ audience. Three shapes, each with a real cost:
 
 | Shape | What it means | Cost |
 |---|---|---|
-| **Bring your own key** *(v0.1)* | User creates an Anthropic key, pastes it in. | Free to build. Contradicts the non-technical premise — most of this audience will not get past it. |
-| **Proxy, absorbed cost** | ZeroOS routes through a backend on the developer's key. | Needs a backend, which contradicts "local only, zero hosting". Cost scales with usage and is unbounded. |
+| **Bring your own key** *(v0.1)* | User creates an OpenRouter key, pastes it in. | Free to build. Contradicts the non-technical premise — most of this audience will not get past it. |
+| **Proxy, absorbed cost** | ZeroOS routes through a backend on the developer's key. | Needs a backend, which contradicts "local only, zero hosting". Inference is cheap enough not to be the objection — see below. |
 | **Subscription with proxy** | Backend plus auth plus billing plus quota. | Viable business. Is a second project in its own right, larger than v0.1. |
 
-Deciding this changes the architecture (a proxy means the app is no longer local-only)
-so it must be decided before v0.2 is planned, not at launch.
+**The cost objection to proxying is gone; the architectural one is not.** At
+`qwen/qwen3.7-flash` pricing, a measured three-action turn costs $0.00006. A user doing
+a hundred turns a day costs about **$0.18 a month**; a thousand such users cost about
+**$180 a month**, and hosting the proxy would likely exceed the inference bill. That
+kills the "unbounded cost" argument this table previously made.
+
+What remains is that a proxy makes the app no longer local-only, which is a design
+change, not a budget one. Absorbed cost is now the *cheapest* option to run and the
+*most expensive* option to build. Decide before v0.2 is planned, not at launch.
+
+Two things this leaves open: abuse control (an absorbed-cost proxy with no auth is a
+free inference endpoint the moment anyone points a script at it), and the fact that the
+cost estimate above assumes turns stay small. Conversation memory in v0.2 grows the
+prompt every turn, and prompt tokens are the side that scales.
 
 ### Others
 
-- **Cost transparency in the UI.** A user who does not know tokens exist can still
-  watch a number go up. Some form of per-conversation cost display is needed before
-  anyone but the developer runs it.
+- **Cost transparency in the UI.** Deliberately *not* built for v0.1. At $0.00006 a
+  turn, a running cost display would show `$0.00` for weeks and teach the user nothing.
+  It becomes necessary if v0.2 memory grows prompts materially, or if a proxy makes
+  someone else's budget the one being spent.
 - **Crash and error reporting.** Currently a local log file. Fine for dogfooding,
   insufficient once testers exist and cannot read it.
 - **A written trust story.** "What can this app do to my files?" needs a plain-language
