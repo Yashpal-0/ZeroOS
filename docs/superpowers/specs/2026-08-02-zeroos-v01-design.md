@@ -263,6 +263,13 @@ permission gate then measures nothing.
 4. Denied actions return `"The user declined this action."` as their tool result. The
    model sees the denial and adapts — it does not retry the same call.
 
+Here "turn" means **one model response**, not one user message. A request the model
+answers in several rounds — create a folder, look at what landed in it, then move
+files — asks once per round, because the second round's actions do not exist while
+the first dialog is open. Nothing can batch approval for an action not yet proposed.
+The guarantee is that every `confirm` action the model proposes *at the same time* is
+shown together, and that the user is never asked twice about the same action.
+
 Ordering: within a turn, approved `confirm` actions execute sequentially in the order
 the model emitted them, because file operations can depend on each other (create the
 folder, then move files into it). `auto` actions have no such dependency and run in
