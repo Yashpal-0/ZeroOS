@@ -28,7 +28,9 @@ def denied_roots() -> tuple[Path, ...]:
         h / ".gnupg",
         paths.config_dir(),
         paths.data_dir(),
-        h / ".local" / "share" / "keyrings",
+        # data_dir() is "<xdg data base>/ZeroOS"; .parent recovers the xdg
+        # data base itself so this tracks XDG_DATA_HOME the same way.
+        paths.data_dir().parent / "keyrings",
     )
 
 
@@ -54,7 +56,7 @@ def resolve(raw: str) -> Path:
         resolved = candidate.resolve()
     except ValueError:
         # e.g. an embedded null byte. Not a valid path either way.
-        raise Refused()
+        raise Refused() from None
     home_resolved = h.resolve()
 
     if resolved != home_resolved and not resolved.is_relative_to(home_resolved):

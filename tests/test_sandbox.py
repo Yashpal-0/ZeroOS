@@ -120,3 +120,32 @@ def test_refuses_the_action_log_under_a_relocated_xdg_data_home(tmp_path, monkey
 def test_refuses_a_null_byte_instead_of_raising(home):
     with pytest.raises(sandbox.Refused):
         sandbox.resolve("Documents/a\0b")
+
+
+def test_refuses_the_keyring_directory_under_a_relocated_xdg_data_home(tmp_path, monkeypatch):
+    # keyrings was still hardcoded to .local/share/keyrings after the round-1
+    # fix, so a relocated XDG_DATA_HOME left the real keyring directory
+    # unprotected while the denylist guarded an empty one.
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("ZEROOS_HOME", str(home))
+
+    xdg_data = home / "xdg_data"
+    xdg_data.mkdir()
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_data))
+
+    with pytest.raises(sandbox.Refused):
+        sandbox.resolve(str(xdg_data / "keyrings" / "login.keyring"))
+
+
+def test_refuses_config_dir_under_a_relocated_xdg_config_home(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("ZEROOS_HOME", str(home))
+
+    xdg_config = home / "xdg_config"
+    xdg_config.mkdir()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config))
+
+    with pytest.raises(sandbox.Refused):
+        sandbox.resolve(str(xdg_config / "ZeroOS" / "settings.json"))
