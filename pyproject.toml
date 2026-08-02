@@ -1,0 +1,20 @@
+[project]
+name = "zeroos"
+version = "0.1.0"
+description = "A text-driven assistant that operates your Linux desktop through a fixed catalog of safe actions."
+requires-python = ">=3.11"
+dependencies = ["openai>=2.34.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["zeroos*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
