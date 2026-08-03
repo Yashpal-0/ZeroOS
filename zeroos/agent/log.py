@@ -7,7 +7,7 @@ but never file contents: write_text_file's `content` and write_clipboard's
 """
 
 import json
-import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from zeroos.platform import paths
@@ -38,7 +38,12 @@ def record(name: str, arguments: dict, tier: str, verdict: str, result: str) -> 
     if target.exists() and target.stat().st_size > _ROTATE_AT_BYTES:
         target.replace(target.with_suffix(".log.1"))
     entry = {
-        "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        # UTC, matching memory.jsonl, history.jsonl and usage.log. This was
+        # local time with no offset until v0.2's three new files all stamped
+        # UTC, which left the four unalignable without knowing the host's
+        # timezone -- and this is the log someone reads when they want to know
+        # what happened just before something else.
+        "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "tool": name,
         "arguments": _redact(name, arguments),
         "tier": tier,

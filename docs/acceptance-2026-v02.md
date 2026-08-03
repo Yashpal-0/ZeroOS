@@ -435,3 +435,19 @@ tester should not be the first to meet them.
    it is the inverse of this plan's other recurring defect (five instances of
    tests that could not *fail*), and both are failures of the same kind: a test
    whose result was decided before the code was written.
+
+5. **Two timestamp conventions across four files.** Found while correlating the
+   walk's output. `actions.log` stamped naive local time (`23:48:21`) while
+   `memory.jsonl`, `history.jsonl` and `usage.log` all stamped UTC with a `Z`
+   (`18:18:21Z`) — the same instant, five and a half hours apart on the page.
+   v0.2 introduced the split: `actions.log` is v0.1's and was the only one of
+   the four until three UTC files landed around it. Reading the log to answer
+   "what happened just before this" needed the host's timezone offset, which is
+   exactly what the reader does not have.
+
+   **Fixed**, by moving `log.record` to UTC to match the other three, with
+   `tests/test_log.py::test_the_timestamp_is_utc_and_matches_the_other_three_files`
+   pinning it — no test pinned the format before, which is why the drift was
+   free. One consequence left alone: any `actions.log` written before this fix
+   holds both conventions in one file. Not migrated, because a dogfooding log is
+   not worth a rewriting pass, but a reader of an old log should know.

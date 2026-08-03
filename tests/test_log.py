@@ -47,3 +47,16 @@ def test_appends_rather_than_overwrites(home):
     log.record("list_apps", {}, "auto", "allow", "ok")
     log.record("list_apps", {}, "auto", "allow", "ok")
     assert len(entries(home)) == 2
+
+
+def test_the_timestamp_is_utc_and_matches_the_other_three_files(home):
+    # memory.jsonl, history.jsonl and usage.log all stamp "...Z". This log
+    # stamped naive local time, so correlating the four needed the host's
+    # offset -- which the person reading them does not have.
+    from datetime import datetime, timezone
+
+    log.record("move_file", {"source": "a"}, "confirm", "allow", "Moved a.")
+    written = entries(home)[0]["at"]
+    assert written.endswith("Z")
+    stamped = datetime.strptime(written, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    assert abs((datetime.now(timezone.utc) - stamped).total_seconds()) < 60
