@@ -30,6 +30,8 @@ TIERS: dict[str, Tier] = {
     "copy_file": Tier.CONFIRM,
     "move_file": Tier.CONFIRM,
     "trash_file": Tier.CONFIRM,
+    "remember": Tier.CONFIRM,
+    "forget": Tier.CONFIRM,
 }
 
 PATH_ARGUMENTS: dict[str, tuple[str, ...]] = {

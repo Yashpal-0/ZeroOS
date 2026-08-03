@@ -77,7 +77,7 @@ def _hostile_calls(properties, path_shaped):
 
 def test_no_tool_ever_raises_on_hostile_arguments(tools):
     # test_registry.py owns this count; asserted here so a miscount can't silently shrink what this test covers.
-    assert len(tools) == 16
+    assert len(tools) == 18
     for tool in tools:
         path_shaped = set(PATH_ARGUMENTS.get(tool.name, ()))
         for arguments in _hostile_calls(tool.input_schema["properties"], path_shaped):

@@ -21,11 +21,13 @@ EXPECTED_CONFIRM = {
     "copy_file",
     "move_file",
     "trash_file",
+    "remember",
+    "forget",
 }
 
 
-def test_there_are_exactly_sixteen_tools():
-    assert len(TIERS) == 16
+def test_there_are_exactly_eighteen_tools():
+    assert len(TIERS) == 18
 
 
 def test_auto_tier_matches_the_spec():

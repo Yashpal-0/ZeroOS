@@ -12,8 +12,17 @@ def tools(tmp_path, monkeypatch):
     return registry.build(gate)
 
 
-def test_the_catalog_has_exactly_sixteen_tools(tools):
-    assert len(tools) == 16
+def test_the_catalog_has_exactly_eighteen_tools(tools):
+    assert len(tools) == 18
+
+
+def test_the_memory_tools_are_registered(tools):
+    assert {"remember", "forget"} <= {t.name for t in tools}
+
+
+def test_neither_memory_tool_claims_a_path_argument():
+    assert "remember" not in PATH_ARGUMENTS
+    assert "forget" not in PATH_ARGUMENTS
 
 
 def test_every_catalog_tool_has_a_tier(tools):

@@ -213,7 +213,7 @@ def test_tools_are_sent_in_openai_wire_shape(home):
     session, _, client = build_session([FakeMessage(content="Hi.")], [])
     session.send("hi")
     tools = client.requests[0]["tools"]
-    assert len(tools) == 16
+    assert len(tools) == 18
     assert tools[0]["type"] == "function"
     assert set(tools[0]["function"]) == {"name", "description", "parameters"}
     assert tools[0]["function"]["parameters"]["type"] == "object"
