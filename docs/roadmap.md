@@ -1,8 +1,10 @@
 # ZeroOS Roadmap
 
 What ZeroOS is trying to become, in what order, and what deliberately is not being
-built yet. The current phase is specified in
-[`docs/superpowers/specs/2026-08-02-zeroos-v01-design.md`](superpowers/specs/2026-08-02-zeroos-v01-design.md).
+built yet. v0.1 is specified in
+[`docs/superpowers/specs/2026-08-02-zeroos-v01-design.md`](superpowers/specs/2026-08-02-zeroos-v01-design.md)
+and built; the current phase is
+[`docs/superpowers/specs/2026-08-03-zeroos-v02-design.md`](superpowers/specs/2026-08-03-zeroos-v02-design.md).
 
 ---
 
@@ -55,6 +57,9 @@ inspects and deletes memory, and what memory does to prompt size. v0.1 sends a f
 prefix and does not cache. Memory makes the prefix grow and vary per session, which is
 both the thing that raises cost and the thing that would defeat caching if it is ever
 added — so memory belongs *after* the fixed block, not inside it.
+
+Specified in
+[`docs/superpowers/specs/2026-08-03-zeroos-v02-design.md`](superpowers/specs/2026-08-03-zeroos-v02-design.md).
 
 ### v0.3 — MCP servers
 
