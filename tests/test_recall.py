@@ -59,6 +59,21 @@ def row_titled(dialog, title):
     return next(r for r in widgets(dialog, Adw.ActionRow) if r.get_title() == title)
 
 
+def trash_button_for(dialog, title):
+    """The trash button belonging to one named fact row.
+
+    Not widgets(dialog, Gtk.Button)[0] — that is tree order across the whole
+    presented dialog, which includes Adwaita's own chrome (a go-previous button
+    already sits a few places along). One added header button upstream would
+    silently turn this into a test that clicks the wrong widget.
+    """
+    return next(
+        b
+        for b in widgets(row_titled(dialog, title), Gtk.Button)
+        if b.get_icon_name() == "user-trash-symbolic"
+    )
+
+
 def test_every_remembered_fact_is_shown():
     memory.add("My documents live in the Work folder")
     memory.add("Prefers PDFs over Word files")
@@ -136,8 +151,9 @@ def test_the_trash_button_forgets_that_fact_and_leaves_the_others():
     memory.add("keep me")
     dialog = recall.build(None)
     dialog.present(Gtk.Window())
+    assert len(memory.load()) == 2
 
-    widgets(dialog, Gtk.Button)[0].emit("clicked")
+    trash_button_for(dialog, "delete me").emit("clicked")
 
     assert [fact["text"] for fact in memory.load()] == ["keep me"]
     seen = labels(dialog)
