@@ -76,6 +76,23 @@ def test_a_fact_over_the_character_cap_is_refused():
     assert str(memory.MAX_CHARS) in result
 
 
+def test_an_over_long_fact_is_asked_about_before_it_is_refused():
+    # The length check used to run before gate.decide, so a call rejected for
+    # length consumed no verdict at all. gate.prepare has already shown the row
+    # by then, so the user may have denied it -- and _run, seeing neither the
+    # denial message nor a refusal, logged verdict "executed" for a confirm-tier
+    # call the user said no to. Deciding first is what makes that verdict true.
+    result = remember(DenyGate(), "x" * (memory.MAX_CHARS + 1))
+    assert result == "You said no."
+    assert memory.load() == []
+
+
+def test_an_empty_fact_is_asked_about_before_it_is_refused():
+    # Same seam as the length check above.
+    assert remember(DenyGate(), "   \n\t  ") == "You said no."
+    assert memory.load() == []
+
+
 def test_a_fact_exactly_at_the_cap_is_stored():
     remember(AllowGate(), "x" * memory.MAX_CHARS)
     assert len(memory.load()) == 1

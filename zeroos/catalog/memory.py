@@ -29,14 +29,22 @@ def bind(gate):
         a lasting preference. Do not use it to store the contents of files, or
         anything the user has not said themselves.
         """
+        # Decide before validating. gate.prepare has already shown this call's
+        # row by the time the body runs (§7 says so explicitly, and calls the
+        # post-approval length rejection deliberate), so returning early here
+        # left the user's answer sitting unread in the ledger: a denied over-long
+        # fact came back as the length message, which _run classifies as
+        # "executed". actions.log would then record verdict "executed" for a
+        # confirm-tier call the user declined -- the one question §6 says the
+        # log exists to answer.
+        verdict, message = gate.decide("remember", {"text": text})
+        if verdict is not Verdict.ALLOW:
+            return message
         clean = store.normalise(text)
         if not clean:
             return "There was nothing there to remember."
         if len(clean) > store.MAX_CHARS:
             return f"That is too long to remember — keep it under {store.MAX_CHARS} characters."
-        verdict, message = gate.decide("remember", {"text": text})
-        if verdict is not Verdict.ALLOW:
-            return message
         if len(store.load()) >= store.MAX_FACTS:
             return (
                 f"Already remembering the most I can — {store.MAX_FACTS} things. "

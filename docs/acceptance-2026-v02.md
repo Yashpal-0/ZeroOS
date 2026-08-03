@@ -21,7 +21,7 @@ each.
 > Nothing here marked PASS is marked so without a citation. A criterion marked
 > PASS without a citation is not a criterion, it is a hope.
 
-**Suite state at HEAD (`06005a5`):** `282 passed, 0 failed`. (Warnings are
+**Suite state at HEAD:** `284 passed, 0 failed`. (Warnings are
 pre-existing PyGObject/asyncio deprecation notices, unrelated to the product.)
 The v0.1 baseline was 170; v0.2 added 112 tests.
 
@@ -68,6 +68,19 @@ the screen. That is now proven, by composition rather than by one continuous
 trace — see §6's *"the dialog limb"*. The join is the lambda at
 `zeroos/surface/window.py:39`, which is the only thing `ChatWindow` passes as
 the session's `ask`.
+
+**The criterion's converse is a separate claim, and it was weaker.** "Nothing
+executes without a dialog" is what the evidence above covers. "Everything the
+log calls executed did execute, with an answer behind it" is not the same
+sentence, and the whole-branch review found `remember()` failing it: the empty
+and over-`MAX_CHARS` checks returned *before* `gate.decide`, so a call the user
+had already been shown — and possibly denied — came back with the length
+message, which `session._run` classifies as `"executed"`. `actions.log` then
+recorded verdict `"executed"` for a confirm-tier call that was declined. Fixed
+by deciding before validating, with two regression tests
+(`test_an_over_long_fact_is_asked_about_before_it_is_refused` and its empty-fact
+twin) proven to fail against the previous code. See finding 6 for the wider
+version of the same shape, which is v0.1's and stays open.
 
 ## Criterion 3 — `memory.jsonl`, `history.jsonl` and `usage.log` are unreachable by every sandboxed catalog function
 
@@ -451,3 +464,28 @@ tester should not be the first to meet them.
    free. One consequence left alone: any `actions.log` written before this fix
    holds both conventions in one file. Not migrated, because a dogfooding log is
    not worth a rewriting pass, but a reader of an old log should know.
+
+6. **`_run` classifies a tool's verdict by string equality.** Raised by the
+   whole-branch review against `remember`/`forget`, and true of the whole
+   catalog. `session._run` (`zeroos/agent/session.py:181-203`) has only the
+   returned string as evidence of what happened, so it matches against three
+   module-level constants — `DENIED_MESSAGE`, `REFUSAL_MESSAGE`,
+   `ROOT_REFUSAL_MESSAGE` — and calls everything else `"executed"`. Every
+   internal rejection therefore logs as executed: `files.py`'s *"No file at that
+   location."*, *"That's a folder, not a file."*, *"A folder with that name is
+   already there."*, and their siblings in `openers.py`, `apps.py`, `system.py`
+   and `memory.py`. Counting only the plain string constants the catalog returns
+   (f-string returns excluded, since those are mostly success reports), 19 of 23
+   are rejections of this kind — not the five in `memory.py` the review cited.
+
+   **Not fixed, and deliberately.** Every one of these sits *after* an ALLOW, so
+   `"executed"` means "the approved call ran and reported back", which is a
+   defensible reading of a field whose job is to record the verdict the user
+   gave. The one place it asserted something untrue was `remember`'s two
+   pre-gate returns — that is a v0.2 seam and it is fixed (criterion 2). The
+   rest is v0.1's, and the fix the review proposes — a sentinel type or an
+   `(ok, message)` tuple every catalog function returns — changes the return
+   contract of eighteen tools to sharpen a log field. That is a v0.3 design
+   decision, not a merge blocker. `usage.log`'s `actions` counter inherits the
+   same looseness; per spec §9 it is a retention proxy, not an audit total, and a
+   handful of no-op calls does not move what it is read for.
