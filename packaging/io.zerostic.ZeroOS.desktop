@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=ZeroOS
+Comment=Operate your desktop by typing what you want
+Exec=zeroos
+Icon=io.zerostic.ZeroOS
+Terminal=false
+Type=Application
+Categories=Utility;

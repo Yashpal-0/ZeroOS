@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.zerostic.ZeroOS</id>
+  <name>ZeroOS</name>
+  <summary>Operate your desktop by typing what you want</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>
+      ZeroOS is a text-driven assistant that operates your Linux desktop through a
+      fixed catalog of sixteen safe actions. It finds files, moves them, opens
+      applications, and manages your clipboard, and it asks before it changes
+      anything. It has no shell access and no way to permanently delete a file.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.zerostic.ZeroOS.desktop</launchable>
+  <content_rating type="oars-1.1"/>
+</component>

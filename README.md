@@ -10,7 +10,16 @@ It is not an operating system. It is a desktop app with an agent loop, a permiss
 gate, and sixteen audited actions. It has no shell access and no way to permanently
 delete a file.
 
-**Status:** pre-implementation. Design only.
+## Install
+
+```bash
+flatpak-builder --force-clean --install --user build packaging/io.zerostic.ZeroOS.yml
+flatpak run io.zerostic.ZeroOS
+```
+
+On first launch ZeroOS asks for an OpenRouter API key. Usage is billed by
+OpenRouter and costs a fraction of a penny per request; see
+[the design spec](docs/superpowers/specs/2026-08-02-zeroos-v01-design.md#7-api-key-and-billing).
 
 ## Documentation
 
