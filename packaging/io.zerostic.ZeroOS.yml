@@ -1,6 +1,6 @@
 app-id: io.zerostic.ZeroOS
 runtime: org.gnome.Platform
-runtime-version: '47'
+runtime-version: '50'
 sdk: org.gnome.Sdk
 command: zeroos
 
@@ -34,11 +34,16 @@ modules:
       # reaching out to PyPI.
       #
       # Wheels, not sdists. jiter and pydantic-core are Rust (pyo3) extensions
-      # and org.gnome.Sdk//47 ships no cargo; the SDK also has only setuptools,
+      # and org.gnome.Sdk//50 ships no cargo; the SDK also has only setuptools,
       # not the hatchling/maturin backends most of these build with, so an sdist
       # install fails at "Cannot import 'hatchling.build'" before Rust is even
-      # reached. Upstream already publishes cp312 manylinux wheels matching the
-      # runtime's Python 3.12 — using them is both simpler and reproducible.
+      # reached. Upstream already publishes cp313 manylinux wheels matching the
+      # runtime's Python 3.13 — using them is both simpler and reproducible.
+      #
+      # The cp313 tag is tied to the runtime version above. Bumping the runtime
+      # without re-deriving these two fails at import inside the sandbox, not at
+      # install: pip is happy to stage a wheel whose ABI the interpreter cannot
+      # load. The other fourteen are py3-none-any and are unaffected.
       - pip3 install --prefix=/app --no-index --no-deps *.whl
     sources:
       - type: file
@@ -54,8 +59,8 @@ modules:
         url: https://files.pythonhosted.org/packages/12/b3/231ffd4ab1fc9d679809f356cebee130ac7daa00d6d6f3206dd4fd137e9e/distro-1.9.0-py3-none-any.whl
         sha256: 7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2
       - type: file
-        url: https://files.pythonhosted.org/packages/a8/d2/4839422241aa12860ce597b20068727094ba0bc480723c74924ca5bad483/jiter-0.16.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-        sha256: 46add52f4ad47a08bfb1219f3e673da972191489a33016edefdb5ea55bfa8c48
+        url: https://files.pythonhosted.org/packages/0f/94/db768b6938e0df35c86beeba3dfbbb025c9ee5c19e1aa271f2396e50864d/jiter-0.16.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+        sha256: c682bea068a90b764577bdb78a60a4c1d1606daf9cd4c893832a37c7cc9d9026
       - type: file
         url: https://files.pythonhosted.org/packages/7e/f5/f66802a942d491edb555dd61e3a9961140fd64c90bce1eafd741609d334d/httpcore-1.0.9-py3-none-any.whl
         sha256: 2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55
@@ -78,8 +83,8 @@ modules:
         url: https://files.pythonhosted.org/packages/fd/7b/122376b1fd3c62c1ed9dc80c931ace4844b3c55407b6fb2d199377c9736f/pydantic-2.13.4-py3-none-any.whl
         sha256: 45a282cde31d808236fd7ea9d919b128653c8b38b393d1c4ab335c62924d9aba
       - type: file
-        url: https://files.pythonhosted.org/packages/5f/97/2aab507d3d00ca626e8e57c1eac6a79e4e5fbcc63eb99733ff55d1717f65/pydantic_core-2.46.4-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
-        sha256: 926c9541b14b12b1681dca8a0b75feb510b06c6341b70a8e500c2fdcff837cce
+        url: https://files.pythonhosted.org/packages/07/f8/41db9de19d7987d6b04715a02b3b40aea467000275d9d758ffaa31af7d50/pydantic_core-2.46.4-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+        sha256: 9551187363ffc0de2a00b2e47c25aeaeb1020b69b668762966df15fc5659dd5a
       - type: file
         url: https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl
         sha256: 481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8
@@ -102,3 +107,16 @@ modules:
     sources:
       - type: dir
         path: ..
+        # Build output and test scratch, none of which belongs in the source
+        # copy. This is not tidiness: flatpak-builder's own app dir contains
+        # var/run -> /run, and setuptools' package discovery walks with
+        # followlinks=True. Because this repo lives under /run/media, following
+        # that link re-enters the whole volume, and `pip install .` spends
+        # minutes crawling unrelated trees instead of ~2 seconds. Step 3 of the
+        # migration task creates ./build in the project root, so leaving these
+        # unskipped breaks the *next* build rather than the current one.
+        skip:
+          - build
+          - .flatpak-builder
+          - .pytest-tmp
+          - .git
