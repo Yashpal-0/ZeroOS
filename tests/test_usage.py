@@ -45,5 +45,14 @@ def test_an_unwritable_directory_does_not_raise(monkeypatch):
     usage.record(datetime.now(timezone.utc), turns=1, actions=0, declined=0)
 
 
+def test_a_bad_started_timestamp_does_not_raise(monkeypatch):
+    # The preamble (ended, the stamps, the line) runs outside the guard; a
+    # ValueError from _stamp on an exotic started must not escape record().
+    monkeypatch.setattr(
+        usage, "_stamp", lambda moment: (_ for _ in ()).throw(ValueError("bad stamp"))
+    )
+    usage.record(datetime.now(timezone.utc), turns=1, actions=0, declined=0)
+
+
 def test_the_usage_log_lives_under_the_data_dir(data_home):
     assert str(usage.path()).startswith(str(data_home))

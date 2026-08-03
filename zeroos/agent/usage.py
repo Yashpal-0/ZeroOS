@@ -20,15 +20,17 @@ def path() -> Path:
 
 def record(started: datetime, turns: int, actions: int, declined: int) -> None:
     """Never raises. A failure to record usage must not take the app down on
-    the way out."""
-    ended = datetime.now(timezone.utc)
-    line = (
-        f"{_stamp(started)} ended={_stamp(ended)} "
-        f"turns={turns} actions={actions} declined={declined}\n"
-    )
+    the way out. The preamble (the clock, the stamps) is under the guard too —
+    a clockless OSError or a ValueError from _stamp on an exotic started is the
+    same never-take-the-app-down contract."""
     try:
+        ended = datetime.now(timezone.utc)
+        line = (
+            f"{_stamp(started)} ended={_stamp(ended)} "
+            f"turns={turns} actions={actions} declined={declined}\n"
+        )
         _append(line)
-    except OSError:
+    except (OSError, ValueError):
         pass
 
 
