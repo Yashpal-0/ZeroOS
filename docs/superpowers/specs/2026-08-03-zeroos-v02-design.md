@@ -72,9 +72,8 @@ line of `agent/session.py`.
 ```
 zeroos/
   agent/
-    session.py     MODIFIED  injects memory; records history and usage
+    session.py     MODIFIED  builds the memory block; records history and usage
     prompt.py      MODIFIED  N fixed prompt strings instead of one
-    memory.py      NEW       the fact store
     history.py     NEW       past turns, persisted, never injected
     usage.py       NEW       retention instrumentation
     log.py         unchanged
@@ -85,6 +84,7 @@ zeroos/
     tiers.py       MODIFIED  two new tier entries
     describe.py    MODIFIED  two new dialog rows
   platform/
+    memory.py      NEW       the fact store
     settings.py    NEW       settings.json in config_dir()
     paths.py       unchanged  (config_dir already exists)
   surface/
@@ -100,8 +100,16 @@ through the standard library, and the pane is GTK widgets already in use.
 
 ## 3. The Memory Store
 
-**Location:** `paths.data_dir() / "memory.jsonl"` — the same directory as
-`actions.log`.
+**Module:** `zeroos/platform/memory.py`. **File:** `paths.data_dir() /
+"memory.jsonl"` — the same directory as `actions.log`.
+
+The module belongs to `platform/` because three layers read it — the catalog
+tools, `policy/describe.py` (which needs a fact's text to render the dialog
+row), and `session.py`. v0.1 §2 orders the layers `surface` → `agent` →
+`policy`/`catalog` → `platform`; only the bottom layer can be read by all
+three without inverting that. The store therefore holds no prompt text:
+`MEMORY_PREFACE` stays in `agent/prompt.py` and `session.py` joins the two
+(§5).
 
 That location is a security property, not a convenience. The path sandbox
 already denies the data directory, so the model's own `read_text_file` and
@@ -237,6 +245,10 @@ confirmed.
 
 Reading the file once per step is the cost. At fifty lines it is not a cost.
 
+`session.py` assembles the block itself, from `prompt.MEMORY_PREFACE` and
+`memory.load()`. The store returns facts, never prompt text — that is what
+keeps it in `platform/` and readable from `policy/describe.py` (§3, §7).
+
 ### The memory block
 
 ```
@@ -330,16 +342,24 @@ cases.
 | Call | Row |
 |---|---|
 | `remember(text="My documents live in the Work folder")` | `Remember: "My documents live in the Work folder"` |
-| `forget(id="a1b2c3d4")` | `Forget: "My documents live in the Work folder"` |
+| `forget(fact_id="a1b2c3d4")` | `Forget: "My documents live in the Work folder"` |
 
 `forget` **resolves the id back to the fact's text.** A row reading
 `Forget a1b2c3d4` asks the user to approve something they cannot evaluate. If
 the id resolves to nothing, the row is `Forget something that is no longer
 remembered` and the tool will return the not-found message.
 
-Rows are plain text. `dialog.py` builds each row as a `Gtk.CheckButton(label=…)`
-and never enables `use-markup`; that must stay true, because row text is
-attacker-influenced. The 200-character cap keeps a row from becoming a wall.
+Rows are plain text. `dialog.py` builds each row as a `Gtk.CheckButton(label=…)`,
+which does not interpret markup unless `use-markup` is turned on; it must stay
+off, because row text is attacker-influenced. (The recall pane's
+`Adw.PreferencesRow` defaults the other way — see §10.)
+
+**`describe` truncates for display.** The 200-character cap does not bound the
+row: `gate.prepare` renders every call in the turn *before* any tool body runs,
+so a 10 KB `remember` argument becomes a 10 KB row and is only rejected
+afterwards. `describe` therefore cuts at `MAX_CHARS` and marks the cut with an
+ellipsis. Since §6 makes the row the primary defence, a check that runs after
+the user has already answered cannot be what keeps it readable.
 
 Example, mixed turn:
 
@@ -447,6 +467,12 @@ The pane is what makes §6's secondary defences real. Without it, a bad memory
 is only removable by editing a JSONL file in a terminal, which for this
 product's user means it is not removable.
 
+**Every row sets `use_markup=False` explicitly.** `Adw.PreferencesRow:use-markup`
+defaults to **TRUE** — the opposite of the dialog's `Gtk.CheckButton` rows (§7).
+Fact text is attacker-influenced, and a fact wrapped in a `<span>` would render
+invisible in the one screen that exists so the user can find and delete it. Not
+enabling markup is not enough here; it has to be turned off.
+
 ---
 
 ## 11. Runtime Migration
@@ -487,6 +513,13 @@ New adversarial cases the suite must cover:
 - `memory.jsonl` under a relocated `XDG_DATA_HOME` is still sandbox-denied to
   `read_text_file` and `write_text_file`.
 - The dialog row for `forget` shows the fact's text, not its id.
+- A 10,000-character `remember` — the dialog row is truncated with an
+  ellipsis, not rendered whole. (The tool's own length check runs too late to
+  affect the row.)
+- A fact containing `<b>` or a `<span foreground="…">` — shown as literal text
+  in the recall pane, not rendered as markup.
+- `zeroos/platform/memory.py` contains no import of `zeroos.agent`, so
+  `policy/describe.py` reading it does not invert the layer order.
 - With zero memories, the outgoing request has exactly one system message and
   its content is byte-identical to v0.1's `SYSTEM_PROMPT`.
 - A `remember` approved mid-turn appears in the next step's messages within
