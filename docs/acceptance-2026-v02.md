@@ -21,9 +21,9 @@ each.
 > Nothing here marked PASS is marked so without a citation. A criterion marked
 > PASS without a citation is not a criterion, it is a hope.
 
-**Suite state at HEAD (`59be9d1`):** `281 passed, 0 failed`. (Warnings are
+**Suite state at HEAD (`06005a5`):** `282 passed, 0 failed`. (Warnings are
 pre-existing PyGObject/asyncio deprecation notices, unrelated to the product.)
-The v0.1 baseline was 170; v0.2 added 111 tests.
+The v0.1 baseline was 170; v0.2 added 112 tests.
 
 **The seam to watch.** v0.1's acceptance pass found a defect no per-task review
 could see, because it lived between two tasks: `session._run` logged a
