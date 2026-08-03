@@ -126,6 +126,31 @@ def test_declined_action_is_not_logged_as_executed(home, monkeypatch):
     )
 
 
+def test_a_root_refusal_is_not_logged_as_executed(home, monkeypatch):
+    """sandbox raises two different refusal messages; the log must know both.
+
+    refuse_root() carries ROOT_REFUSAL_MESSAGE, not the default REFUSAL_MESSAGE,
+    so a decision that only compares the latter records the blocked action as
+    "executed" — the log claiming ZeroOS trashed the home folder it refused to
+    touch.
+    """
+    written = []
+    monkeypatch.setattr(
+        session_module.log, "record",
+        lambda name, arguments, tier, verdict, result: written.append((name, verdict)),
+    )
+    responses = [
+        FakeMessage(tool_calls=[tool_call("1", "trash_file", path="~")]),
+        FakeMessage(content="I can't do that."),
+    ]
+    session, _, _ = build_session(responses, [True])
+    session.send("bin my home folder")
+
+    assert written == [("trash_file", "refused")], (
+        "refuse_root blocked the action, so the log must not claim it executed"
+    )
+
+
 def test_every_tool_call_is_answered_with_its_own_id(home):
     responses = [
         FakeMessage(tool_calls=[

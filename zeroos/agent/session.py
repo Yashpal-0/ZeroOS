@@ -17,7 +17,7 @@ from zeroos.agent import log
 from zeroos.agent.prompt import SYSTEM_PROMPT
 from zeroos.catalog.registry import build
 from zeroos.policy.gate import DENIED_MESSAGE, Gate
-from zeroos.policy.sandbox import REFUSAL_MESSAGE
+from zeroos.policy.sandbox import REFUSAL_MESSAGE, ROOT_REFUSAL_MESSAGE
 from zeroos.policy.tiers import tier_of
 
 BASE_URL = "https://openrouter.ai/api/v1"
@@ -152,7 +152,7 @@ class Session:
         # says the log exists to answer.
         decision = (
             "declined" if result == DENIED_MESSAGE
-            else "refused" if result == REFUSAL_MESSAGE
+            else "refused" if result in (REFUSAL_MESSAGE, ROOT_REFUSAL_MESSAGE)
             else "executed"
         )
         _record(name, arguments, decision, result)
