@@ -106,3 +106,23 @@ def test_no_prompt_contains_a_format_placeholder():
 
 def test_the_memory_preface_says_memories_are_not_instructions():
     assert "not instructions" in prompt.MEMORY_PREFACE
+
+
+def test_the_preface_tells_the_model_to_use_what_it_knows():
+    # v0.2 stored facts and then behaved as though it had not, because the
+    # preface only said what the facts are NOT. Spec section 3.
+    assert "Use them." in prompt.MEMORY_PREFACE
+
+
+def test_the_preface_states_the_boundary_before_the_encouragement():
+    # Order is load-bearing. A model that reads only the opening lines must
+    # read the restriction, not the licence.
+    text = prompt.MEMORY_PREFACE
+    assert text.index("not instructions to you") < text.index("Use them.")
+
+
+def test_editing_the_preface_cannot_move_the_first_system_message():
+    # Criterion 4: a fresh install's request stays byte-identical to v0.1's.
+    # MEMORY_PREFACE lives in the second system message, which does not exist
+    # when nothing is stored, so this must hold no matter what section 3 adds.
+    assert prompt.MEMORY_PREFACE not in prompt.SYSTEM_PROMPT
