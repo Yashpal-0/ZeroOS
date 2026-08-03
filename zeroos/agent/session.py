@@ -92,7 +92,7 @@ class Session:
     def __init__(
         self,
         api_key: str,
-        ask: Callable[[list[str]], list[bool]],
+        ask: Callable[[list[tuple[str, bool]]], list[bool]],
         client=None,
     ) -> None:
         self._gate = Gate(ask)
