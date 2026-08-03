@@ -43,6 +43,22 @@ def shown(dialog) -> list[str]:
     return labels(dialog)
 
 
+def widgets(widget, kind) -> list:
+    """Every descendant of the given type, in tree order."""
+    found = []
+    child = widget.get_first_child()
+    while child is not None:
+        if isinstance(child, kind):
+            found.append(child)
+        found.extend(widgets(child, kind))
+        child = child.get_next_sibling()
+    return found
+
+
+def row_titled(dialog, title):
+    return next(r for r in widgets(dialog, Adw.ActionRow) if r.get_title() == title)
+
+
 def test_every_remembered_fact_is_shown():
     memory.add("My documents live in the Work folder")
     memory.add("Prefers PDFs over Word files")
@@ -106,3 +122,67 @@ def test_a_past_turn_containing_markup_is_shown_as_text():
     seen = shown(recall.build(None))
     assert any("<i>question</i>" in text for text in seen)
     assert any("<b>reply</b>" in text for text in seen)
+
+
+# The tests above drive the module functions directly, which leaves every
+# signal connect in this pane unproven: all of them can be deleted with the
+# suite still green. These four drive the widgets instead, because "removable
+# without a terminal" is a claim about the buttons, not about the functions
+# behind them.
+
+
+def test_the_trash_button_forgets_that_fact_and_leaves_the_others():
+    memory.add("delete me")
+    memory.add("keep me")
+    dialog = recall.build(None)
+    dialog.present(Gtk.Window())
+
+    widgets(dialog, Gtk.Button)[0].emit("clicked")
+
+    assert [fact["text"] for fact in memory.load()] == ["keep me"]
+    seen = labels(dialog)
+    assert not any("delete me" in text for text in seen)
+    assert any("keep me" in text for text in seen)
+
+
+def test_the_bulk_rows_ask_before_they_delete(monkeypatch):
+    """Both danger rows must reach _confirm, and carry the right action into
+    it. A row wired straight to the action would empty the store here."""
+    asked = []
+    monkeypatch.setattr(recall, "_confirm", lambda dialog, action: asked.append(action))
+    memory.add("still here")
+    history.append("q", "a")
+    dialog = recall.build(None)
+    dialog.present(Gtk.Window())
+
+    row_titled(dialog, "Forget everything").emit("activated")
+    row_titled(dialog, "Clear history").emit("activated")
+
+    assert asked == [recall.forget_everything, recall.clear_history]
+    assert len(memory.load()) == 1
+    assert len(history.load()) == 1
+
+
+def test_dismissing_the_confirmation_deletes_nothing():
+    """cancel is both the default and the close response, so Escape and
+    clicking away land here. Dismissal is never approval."""
+    memory.add("survives")
+    dialog = recall.build(None)
+    dialog.present(Gtk.Window())
+
+    recall._on_confirmed(dialog, recall.forget_everything, "cancel")
+    assert len(memory.load()) == 1
+
+    recall._on_confirmed(dialog, recall.forget_everything, "delete")
+    assert memory.load() == []
+
+
+def test_picking_a_form_of_address_in_the_combo_persists_it():
+    settings.set_address("sir")
+    dialog = recall.build(None)
+    dialog.present(Gtk.Window())
+    combo = widgets(dialog, Adw.ComboRow)[0]
+
+    combo.set_selected(settings.ADDRESSES.index("none"))
+
+    assert settings.address() == "none"
