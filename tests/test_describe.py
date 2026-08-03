@@ -119,6 +119,9 @@ def test_forget_resolves_the_id_to_the_facts_text():
 def test_forget_never_shows_a_bare_id():
     fact_id = memory.add("something")
     row = describe.describe_batch([("forget", {"fact_id": fact_id})])[0]
+    # Equality gives this teeth: a wrong implementation (wrong fact's text,
+    # a hardcoded string) can dodge a bare substring check but not this.
+    assert row == 'Forget: "something"'
     assert fact_id not in row
 
 
@@ -135,6 +138,8 @@ def test_no_memory_row_says_run():
 
 
 def test_a_memory_row_is_always_one_line():
+    # Catches a dropped memory.normalise() call: without it the embedded
+    # newline survives into the row instead of collapsing to a space.
     row = describe.describe_batch([("remember", {"text": "first\nsecond"})])[0]
     assert "\n" not in row
 
