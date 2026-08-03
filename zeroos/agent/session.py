@@ -9,13 +9,15 @@ it. That is a v0.1 simplification, not a permanent one.
 """
 
 import json
+from datetime import datetime, timezone
 from typing import Callable
 
 import openai
 
-from zeroos.agent import log
-from zeroos.agent.prompt import SYSTEM_PROMPT
+from zeroos.agent import history, log, usage
+from zeroos.agent.prompt import MEMORY_PREFACE, PROMPTS
 from zeroos.catalog.registry import build
+from zeroos.platform import memory, settings
 from zeroos.policy.gate import DENIED_MESSAGE, Gate
 from zeroos.policy.sandbox import REFUSAL_MESSAGE, ROOT_REFUSAL_MESSAGE
 from zeroos.policy.tiers import tier_of
@@ -98,17 +100,27 @@ class Session:
         self._schemas = [schema_for(tool) for tool in self._tools.values()]
         self._messages: list[dict] = []
         self._client = client or openai.OpenAI(api_key=api_key, base_url=BASE_URL)
+        # Resolved once, here — not per turn and not per step. A prompt built
+        # per turn is the thing that makes caching impossible later, and the
+        # form of address changing under a live conversation would read as the
+        # assistant changing character mid-sentence.
+        self._prompt = PROMPTS[settings.address()]
+        self._started = datetime.now(timezone.utc)
+        self._turns = self._actions = self._declined = 0
 
     def send(self, text: str) -> str:
         """Run one turn to completion and return the model's final text."""
         self._messages.append({"role": "user", "content": text})
+        self._turns += 1
         reply = ""
 
         for _ in range(MAX_STEPS):
             message = self._client.chat.completions.create(
                 model=MODEL,
                 max_tokens=MAX_TOKENS,
-                messages=[{"role": "system", "content": SYSTEM_PROMPT}] + self._messages,
+                messages=[{"role": "system", "content": self._prompt}]
+                + self._memory_messages()
+                + self._messages,
                 tools=self._schemas,
                 tool_choice="auto",
             ).choices[0].message
@@ -136,7 +148,35 @@ class Session:
         # A model that exhausts the step bound without ever writing a sentence
         # would otherwise return "" and leave the window blank, which reads as
         # a crash. Say something true instead.
-        return reply or STALLED
+        reply = reply or STALLED
+        history.append(text, reply)
+        return reply
+
+    @staticmethod
+    def _memory_messages() -> list[dict]:
+        """The second system message, or nothing at all.
+
+        Read inside the step loop, not once per turn: a remember approved
+        halfway through a turn must be visible to the next model call in that
+        same turn, or the assistant appears to forget what it just confirmed.
+
+        Empty means omitted, not sent blank — a fresh install's request is
+        byte-identical to v0.1's. Spec §13.4.
+
+        The preface lives in prompt.py and the facts in platform/memory.py;
+        joining them is this layer's job, which is what keeps the store free
+        of prompt text and importable from policy/describe.py.
+        """
+        facts = memory.load()
+        if not facts:
+            return []
+        lines = "\n".join(f"[{f['id']}] {f['text']}" for f in facts)
+        return [{"role": "system", "content": f"{MEMORY_PREFACE}\n\n{lines}"}]
+
+    def close(self) -> None:
+        """Called once, on window shutdown. Never raises — usage.record swallows
+        its own failures, and a usage line is never worth losing a shutdown."""
+        usage.record(self._started, self._turns, self._actions, self._declined)
 
     def _run(self, name: str, arguments: dict) -> str:
         """Execute one call. Always returns a string for the model to read."""
@@ -155,6 +195,10 @@ class Session:
             else "refused" if result in (REFUSAL_MESSAGE, ROOT_REFUSAL_MESSAGE)
             else "executed"
         )
+        if decision == "executed":
+            self._actions += 1
+        elif decision == "declined":
+            self._declined += 1
         _record(name, arguments, decision, result)
         return result
 

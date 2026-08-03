@@ -54,6 +54,9 @@ def tool_call(id_, name, **arguments):
 def home(tmp_path, monkeypatch):
     monkeypatch.setenv("ZEROOS_HOME", str(tmp_path))
     monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+    # v0.2 stores resolve through paths.config_dir() too, and an inherited
+    # XDG_CONFIG_HOME would point the settings file at the real config.
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     (tmp_path / "Downloads").mkdir()
     (tmp_path / "Documents").mkdir()
     (tmp_path / "Downloads" / "a.pdf").write_text("x")
@@ -257,6 +260,165 @@ def test_an_unknown_tool_name_is_answered_rather_than_crashing(home):
     results = [m for m in client.requests[1]["messages"] if m.get("role") == "tool"]
     assert len(results) == 1
     assert reply == "I can't do that."
+
+
+def system_messages(request) -> list[dict]:
+    return [m for m in request["messages"] if m["role"] == "system"]
+
+
+def test_with_no_memories_there_is_exactly_one_system_message(home):
+    """Spec §13.4. A fresh install's request is byte-identical to v0.1's."""
+    from zeroos.agent.prompt import SYSTEM_PROMPT
+
+    session, _, client = build_session([FakeMessage(content="hello")], [])
+    session.send("hi")
+    system = system_messages(client.requests[0])
+    assert len(system) == 1
+    assert system[0]["content"] == SYSTEM_PROMPT
+
+
+def test_a_stored_memory_becomes_a_second_system_message(home):
+    from zeroos.agent.prompt import SYSTEM_PROMPT
+    from zeroos.platform import memory
+
+    memory.add("My documents live in the Work folder")
+    session, _, client = build_session([FakeMessage(content="hello")], [])
+    session.send("hi")
+    system = system_messages(client.requests[0])
+    assert len(system) == 2
+    assert system[0]["content"] == SYSTEM_PROMPT
+    assert "My documents live in the Work folder" in system[1]["content"]
+
+
+def test_the_second_system_message_lists_facts_with_their_ids_under_the_preface(home):
+    from zeroos.agent.prompt import MEMORY_PREFACE
+    from zeroos.platform import memory
+
+    first = memory.add("alpha")
+    second = memory.add("beta")
+    session, _, client = build_session([FakeMessage(content="hello")], [])
+    session.send("hi")
+    block = system_messages(client.requests[0])[1]
+    assert block["content"].startswith(MEMORY_PREFACE)
+    assert f"[{first}] alpha" in block["content"]
+    assert f"[{second}] beta" in block["content"]
+
+
+def test_the_fixed_prompt_is_never_interpolated(home):
+    from zeroos.platform import memory
+
+    memory.add("a fact")
+    session, _, client = build_session([FakeMessage(content="hello")], [])
+    session.send("hi")
+    assert "a fact" not in system_messages(client.requests[0])[0]["content"]
+
+
+def test_the_memory_block_is_rebuilt_between_steps(home):
+    """A remember approved mid-turn is visible to the very next model call.
+
+    Built once per send() instead, the fact would not appear until the user
+    typed again — the assistant forgetting what it just confirmed.
+    """
+    responses = [
+        FakeMessage(tool_calls=[tool_call("1", "remember", text="mid-turn fact")]),
+        FakeMessage(content="done"),
+    ]
+    session, _, client = build_session(responses, [True])
+    session.send("remember something")
+    second = system_messages(client.requests[1])
+    assert any("mid-turn fact" in m["content"] for m in second)
+
+
+def test_the_form_of_address_is_resolved_once_at_construction(home):
+    from zeroos.agent.prompt import PROMPTS
+    from zeroos.platform import settings
+
+    settings.set_address("maam")
+    session, _, client = build_session([FakeMessage(content="hello")], [])
+    settings.set_address("sir")
+    session.send("hi")
+    assert system_messages(client.requests[0])[0]["content"] == PROMPTS["maam"]
+
+
+def test_a_completed_turn_lands_in_history(home):
+    from zeroos.agent import history
+
+    session, _, _ = build_session([FakeMessage(content="I found one file.")], [])
+    session.send("find my tax pdf")
+    turns = history.load()
+    assert len(turns) == 1
+    assert turns[0]["you"] == "find my tax pdf"
+    assert turns[0]["zeroos"] == "I found one file."
+
+
+def test_history_never_reaches_the_model(home):
+    """Asserts on the whole request body. Spec §1: history is displayed, not sent."""
+    from zeroos.agent import history
+
+    history.append("a turn from last week", "and its reply")
+    session, _, client = build_session([FakeMessage(content="hello")], [])
+    session.send("hi")
+    body = repr(client.requests[0])
+    assert "a turn from last week" not in body
+    assert "and its reply" not in body
+
+
+def test_a_prior_sessions_history_does_not_grow_the_prompt(home):
+    from zeroos.agent import history
+
+    for n in range(200):
+        history.append(f"q{n}", f"a{n}")
+    session, _, client = build_session([FakeMessage(content="hello")], [])
+    session.send("hi")
+    assert len(client.requests[0]["messages"]) == 2  # system + user
+
+
+def test_close_records_the_session(home):
+    from zeroos.agent import usage
+
+    session, _, _ = build_session([FakeMessage(content="hello")], [])
+    session.send("hi")
+    session.close()
+    assert "turns=1" in usage.path().read_text(encoding="utf-8")
+
+
+def test_close_counts_executed_and_declined_actions(home):
+    from zeroos.agent import usage
+
+    responses = [
+        FakeMessage(tool_calls=[tool_call("1", "list_apps")]),
+        FakeMessage(content="done"),
+    ]
+    session, _, _ = build_session(responses, [])
+    session.send("what apps do I have")
+    session.close()
+    line = usage.path().read_text(encoding="utf-8")
+    assert "actions=1" in line
+    assert "declined=0" in line
+
+
+def test_close_counts_a_declined_action(home):
+    from zeroos.agent import usage
+
+    responses = [
+        FakeMessage(tool_calls=[tool_call("1", "trash_file", path=str(home / "Downloads" / "a.pdf"))]),
+        FakeMessage(content="left it"),
+    ]
+    session, _, _ = build_session(responses, [False])
+    session.send("bin that")
+    session.close()
+    line = usage.path().read_text(encoding="utf-8")
+    assert "declined=1" in line
+    assert "actions=0" in line
+
+
+def test_close_writes_no_message_content(home):
+    from zeroos.agent import usage
+
+    session, _, _ = build_session([FakeMessage(content="a secret reply")], [])
+    session.send("a secret question")
+    session.close()
+    assert "secret" not in usage.path().read_text(encoding="utf-8")
 
 
 def test_the_loop_is_bounded(home, monkeypatch):
