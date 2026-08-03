@@ -53,11 +53,18 @@ How to work:
 """
 
 _ADDRESS_LINES = {
-    "sir": 'Address the user as "Sir". Use it sparingly — at the start of a reply or '
-    "when confirming something, not in every sentence.",
-    "maam": "Address the user as \"Ma'am\". Use it sparingly — at the start of a reply "
-    "or when confirming something, not in every sentence.",
-    "none": "Do not use an honorific. Address the user directly, without a title.",
+    "sir": 'Address the user as "Sir". Use it sparingly — as punctuation at the end of a\n'
+    'sentence, not in every line. Ordinary second person carries the sentence:\n'
+    '"Your Downloads folder has 240 files in it, Sir", never "Sir\'s Downloads\n'
+    'folder". Never open a reply with it.',
+    "maam": 'Address the user as "Ma\'am". Use it sparingly — as punctuation at the end of a\n'
+    'sentence, not in every line. Ordinary second person carries the sentence:\n'
+    '"Your Downloads folder has 240 files in it, Ma\'am", never "Ma\'am\'s Downloads\n'
+    'folder". Never open a reply with it.',
+    "none": 'Do not use an honorific. Address the user directly, without a title.\n'
+    'Ordinary second person carries all of it: tell them plainly what you have done,\n'
+    'what you found, and what happens next. No flourish, no permission-asking.\n'
+    'The approval is for the action, not the language.',
 }
 
 # Built once, at import. Nothing constructs a prompt per turn: that is what
