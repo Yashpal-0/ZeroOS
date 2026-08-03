@@ -1,10 +1,10 @@
 # ZeroOS v0.1 — Acceptance Pass
 
 Spec §9 sets seven success criteria. This document records the evidence for
-each. Criteria 1, 2, 3, and 7 are mechanical and were verified by the agent
-against the test suite at HEAD `c1b32e5`. Criteria 4, 5, and 6 require a
-human at the machine — a clean install, an onboarding run, and a real
-non-technical tester — and are left blank here pending that pass.
+each. Criteria 1, 2, 3, and 7 are mechanical and were verified against the
+test suite. Criterion 4's build-and-install half is now proven; its
+menu-launch half, along with criteria 5 and 6, needs a human at the machine
+and is left open pending that pass.
 
 **Suite state at HEAD:** `170 passed, 0 failed`. (Warnings are pre-existing
 PyGObject/asyncio deprecation notices, unrelated to the product.)
@@ -29,7 +29,7 @@ defense-in-depth chain holds end to end (see Open Items for what remains).
 `len(tools) == 16`. `test_every_catalog_tool_has_a_tier` asserts no tool is
 without a tier. Both pass. Every catalog module carries its own unit tests
 (`test_catalog_files.py`, `test_catalog_openers.py`, `test_catalog_apps.py`,
-`test_catalog_system.py`); the full 169-test suite exercises them.
+`test_catalog_system.py`); the full 170-test suite exercises them.
 
 ## Criterion 2 — The policy gate suite passes, including every adversarial path case in §8
 
@@ -64,35 +64,44 @@ across the main-loop/thread boundary and confirms dismissal routes to denial.
 
 ## Criterion 4 — `flatpak install` succeeds on a clean GNOME system and the app launches from the applications menu
 
-**PENDING — requires the build, which requires the toolchain.**
+**BUILD AND INSTALL: PASS. Menu launch: pending your check.**
 
-The Flatpak manifest (`packaging/io.zerostic.ZeroOS.yml`), desktop entry, and
-metainfo are written, internally consistent, and hash-verified, but **the
-manifest has never been built.** Two things block this:
-
-1. `flatpak` and `flatpak-builder` are not installed on the build machine;
-   installing them needs sudo (`sudo apt install flatpak flatpak-builder`),
-   which is the user's call.
-2. **Two dependencies build from Rust source.** `pydantic_core` and `jiter`
-   are both pyo3/maturin Rust extensions; the offline sdist install forces a
-   build needing `cargo` + `rustc`, which `org.gnome.Sdk//47` does not ship by
-   default. The build will need
-   `org.freedesktop.Sdk.Extension.rust-stable` added, or binary wheels
-   permitted for those two packages. The implementer flagged
-   `pydantic_core`; the reviewer caught that `jiter` is the same hazard, so
-   expect *two* Rust builds, not one.
-
-**To run this criterion** (once the toolchain is in place):
+The Flatpak builds clean and is installed (`flatpak list --app` shows
+`io.zerostic.ZeroOS`). Reproduce with:
 
 ```
-flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install flathub org.gnome.Platform//47 org.gnome.Sdk//47
-flatpak install flathub org.freedesktop.Sdk.Extension.rust-stable//24.08
-flatpak-builder --force-clean --install --user build packaging/io.zerostic.ZeroOS.yml
+flatpak remote-add --if-not-exists --user flathub https://flathub.org/repo/flathub.flatpakrepo
+flatpak install --user flathub org.gnome.Platform//47 org.gnome.Sdk//47
+flatpak-builder --user --force-clean --install build packaging/io.zerostic.ZeroOS.yml
 ```
 
-Then launch from the applications menu, not the terminal. Record whether it
-appeared without a logout.
+Verified inside the installed sandbox: `pactl` resolves at `/app/bin/pactl`
+with no missing libraries, and `openai`, `pydantic`, `jiter`, `Gtk 4.0`,
+`Adw 1` and `Secret 1` all import.
+
+**Three defects the static review could not have caught, all fixed in
+`d50de5c`:**
+
+1. **The sdist install could never have worked.** `--no-build-isolation`
+   forbids pip from fetching build backends, and `org.gnome.Sdk//47` ships
+   only `setuptools`/`wheel` — eight of the sixteen dependencies build with
+   `hatchling`. The build died at `Cannot import 'hatchling.build'`.
+   Fixed by pinning all sixteen sources to upstream's published wheels.
+2. **The Rust hazard does not exist.** `jiter` and `pydantic_core` publish
+   `cp312 manylinux` wheels matching the runtime's Python 3.12, so no
+   `cargo`, no compile, and no `rust-stable` SDK extension is needed. The
+   review's two-package Rust risk is void.
+3. **No icon existed.** The desktop file declared `Icon=io.zerostic.ZeroOS`
+   and nothing ever shipped the file, so `appstreamcli` failed the build with
+   `icon-not-found` — a failure that only appears at the end of a real build.
+   Added `packaging/io.zerostic.ZeroOS.svg` and its install line.
+
+**Still yours:** launch it from the applications menu (not the terminal) and
+record whether it appeared without a logout.
+
+> **Note:** `org.gnome.Platform//47` is end-of-life (unsupported since
+> 2025-10-15). It builds and runs today; migrating to a supported runtime is
+> worth doing before any public release.
 
 ## Criterion 5 — Onboarding takes a user from first launch to a working key without a terminal
 
@@ -120,12 +129,12 @@ Watch without helping. Record for each: completed or not, where they
 hesitated, whether they read the approval dialog or clicked through it, and
 anything they said out loud.
 
-> **Known risk to task 3 — volume.** The `pulseaudio-utils` manifest module
-> runs `install -Dm755 /usr/bin/pactl /app/bin/pactl || true`, which copies
-> `pactl` from the *build* sandbox filesystem — which almost certainly does
-> not contain it. The `|| true` swallows the failure silently, so the shipped
-> app may have no `pactl`, in which case `set_volume` fails and task 3 cannot
-> complete. This is unverifiable until the build runs; see Open Items.
+> **Volume risk RESOLVED — `pactl` ships.** The predicted silent failure did
+> not happen: `org.gnome.Sdk//47` does provide `/usr/bin/pactl`, the copy
+> lands, and it runs inside the installed sandbox (`/app/bin/pactl`, 0 missing
+> libraries). `set_volume` should work. The `|| true` remains a latent trap —
+> it would hide the failure if a future SDK dropped the binary — but it is
+> hiding nothing today.
 
 ## Criterion 7 — No code path can perform an action outside the catalog table
 
@@ -143,27 +152,28 @@ can only invoke the bounded `set_volume` tool, never `pactl` directly.
 
 ## Open Items (to resolve before or during the user's pass)
 
-1. **Build the Flatpak (blocks criteria 4, 5, 6).** Install the toolchain and
-   add the Rust SDK extension (two Rust-built deps: `pydantic_core`, `jiter`).
-   This is the single largest open item; nothing past it can be tested.
-2. **Verify `pactl` survives the sandbox (blocks criterion 6, task 3).** Once
-   built, confirm `set_volume` actually changes the sink volume. If the
-   `|| true` module swallowed a missing `pactl`, fix the manifest to fetch
-   `pactl` correctly or bundle pulseaudio-utils properly.
-3. **The batching contradiction (criterion 6, task 2).** The plan's live claim
+1. ~~Build the Flatpak.~~ **DONE** — builds clean and is installed; see
+   criterion 4. Three defects found and fixed in the process (`d50de5c`).
+2. ~~Verify `pactl` survives the sandbox.~~ **DONE** — it ships and runs at
+   `/app/bin/pactl`. That `set_volume` actually moves the sink volume is still
+   worth a live check during criterion 6, task 3.
+3. **Migrate off the end-of-life runtime.** `org.gnome.Platform//47` has been
+   unsupported since 2025-10-15. It builds and runs today, so this does not
+   block acceptance, but it should be settled before any public release.
+4. **The batching contradiction (criterion 6, task 2).** The plan's live claim
    that `qwen/qwen3.7-flash` "returns three tool calls in a single response
    for a three-action request" did not hold in two Task 13 runs — the model
    emitted one. The batched dialog is therefore unproven against real
    batching. Decide: prompt-tune to elicit batching, or accept single-call
    behaviour (the gate degrades gracefully, but the feature goes unexercised).
-4. **Cheap hardening, not a blocker.** `gate.py`'s two consent guards are bare
+5. **Cheap hardening, not a blocker.** `gate.py`'s two consent guards are bare
    `assert`s, which `python -O` / `PYTHONOPTIMIZE=1` would strip. The review
    confirmed the Flatpak does **not** launch under `-O` (manifest
    `command: zeroos`, desktop `Exec=zeroos`, no `PYTHONOPTIMIZE` in
    `finish-args`), so the no-silent-denial guarantee holds in v0.1 as shipped.
    Swapping both to explicit `if ...: raise RuntimeError(...)` would make that
    independent of how the app is launched.
-5. **Unexplained `test_session.py` flakiness.** A reviewer running the suite
+6. **Unexplained `test_session.py` flakiness.** A reviewer running the suite
    from a BASE worktree saw 3 intermittent failures in `tests/test_session.py`.
    It does **not** reproduce at HEAD (4 consecutive clean runs of the full
    suite, 3 isolated runs of `test_session.py`, including with `-p no:randomly`).
