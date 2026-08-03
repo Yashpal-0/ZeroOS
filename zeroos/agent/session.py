@@ -14,7 +14,7 @@ from typing import Callable
 
 import openai
 
-from zeroos.agent import history, log, usage
+from zeroos.agent import history, log, notice, usage
 from zeroos.agent.prompt import MEMORY_PREFACE, PROMPTS
 from zeroos.catalog.registry import build
 from zeroos.platform import memory, settings
@@ -107,9 +107,13 @@ class Session:
         self._prompt = PROMPTS[settings.address()]
         self._started = datetime.now(timezone.utc)
         self._turns = self._actions = self._declined = 0
+        # Candidates from the previous turn, waiting to be offered. In memory
+        # and for at most one turn: there is no spool file and no recovery.
+        self._pending: list[str] = []
 
     def send(self, text: str) -> str:
         """Run one turn to completion and return the model's final text."""
+        self._offer_candidates()
         self._messages.append({"role": "user", "content": text})
         self._turns += 1
         reply = ""
@@ -150,6 +154,11 @@ class Session:
         # a crash. Say something true instead.
         reply = reply or STALLED
         history.append(text, reply)
+        # Produced now, offered at the top of the next turn. The dialog cannot
+        # open before this returns: window.py renders the reply only after
+        # send() comes back, and ask blocks until answered, so a dialog here
+        # would ask about facts drawn from a reply the user has not seen.
+        self._pending = notice.candidates(self._client, self._messages)
         return reply
 
     @staticmethod
@@ -172,6 +181,26 @@ class Session:
             return []
         lines = "\n".join(f"[{f['id']}] {f['text']}" for f in facts)
         return [{"role": "system", "content": f"{MEMORY_PREFACE}\n\n{lines}"}]
+
+    def _offer_candidates(self) -> None:
+        """Put the previous turn's candidates through the ordinary dialog.
+
+        Runs before the step loop, so the loop's own prepare() clears a ledger
+        whose entries have already been consumed. Drained first: offering the
+        same candidate twice would ask about a fact already answered.
+
+        A session's final turn never has its candidates offered. They are
+        dropped rather than saved -- rescuing them would buy back exactly the
+        spool file this design does without.
+        """
+        found, self._pending = self._pending, []
+        if not found:
+            return
+        self._gate.prepare([("remember", {"text": text}) for text in found])
+        for text in found:
+            # Through _run, not store.add: an approved candidate is an ordinary
+            # remember and belongs in actions.log and the counters like one.
+            self._run("remember", {"text": text})
 
     def close(self) -> None:
         """Called once, on window shutdown. Never raises — usage.record swallows

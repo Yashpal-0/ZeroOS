@@ -64,12 +64,13 @@ def home(tmp_path, monkeypatch):
     return tmp_path
 
 
-def build_session(responses, answers):
+def build_session(responses, answers, ask=None):
     asked = []
 
-    def ask(rows):
-        asked.append(list(rows))
-        return answers[: len(rows)]
+    if ask is None:
+        def ask(rows):
+            asked.append(list(rows))
+            return answers[: len(rows)]
 
     client = FakeClient(responses)
     session = session_module.Session(api_key="test", ask=ask, client=client)
@@ -201,7 +202,9 @@ def test_a_turn_with_no_tools_makes_one_request(home):
     session, asked, client = build_session([FakeMessage(content="Hello.")], [])
     assert session.send("hi") == "Hello."
     assert asked == []
-    assert len(client.requests) == 1
+    # Two requests: the reply, plus the noticing pass send() fires at the end
+    # of the turn.
+    assert len(client.requests) == 2
 
 
 def test_the_system_prompt_leads_every_request(home):
@@ -432,5 +435,118 @@ def test_the_loop_is_bounded(home, monkeypatch):
     ]
     session, _, client = build_session(responses, [])
     reply = session.send("loop forever")
-    assert len(client.requests) == 3
+    # Three from the bounded loop, plus one more for the noticing pass send()
+    # fires at the end of the turn.
+    assert len(client.requests) == 4
     assert reply == session_module.STALLED, "a blank window reads as a crash"
+
+
+def test_a_turn_that_produces_candidates_does_not_show_a_dialog(home, monkeypatch):
+    # window.py renders the reply only after send() returns, and ask blocks.
+    # A dialog inside this turn would ask the user to approve facts drawn from
+    # a reply they have not been shown, with the window still reading busy.
+    monkeypatch.setattr(
+        "zeroos.agent.notice.candidates", lambda client, messages: ["a noticed fact"]
+    )
+
+    def ask(rows):
+        raise AssertionError("no dialog may open during the turn that noticed")
+
+    session, _, _ = build_session([FakeMessage(content="Done.")], [], ask=ask)
+    assert session.send("hi") == "Done."
+
+
+def test_candidates_are_offered_at_the_start_of_the_next_turn(home, monkeypatch):
+    from zeroos.platform import memory
+
+    monkeypatch.setattr(
+        "zeroos.agent.notice.candidates", lambda client, messages: ["a noticed fact"]
+    )
+    seen = []
+
+    def ask(rows):
+        seen.append(list(rows))
+        return [True] * len(rows)
+
+    session, _, _ = build_session(
+        [FakeMessage(content="One."), FakeMessage(content="Two.")], [], ask=ask
+    )
+    session.send("hi")
+    assert seen == []
+    session.send("again")
+    assert len(seen) == 1
+    assert seen[0][0][1] is False, "a candidate row must arrive unticked"
+    assert [f["text"] for f in memory.load()] == ["a noticed fact"]
+
+
+def test_a_declined_candidate_stores_nothing(home, monkeypatch):
+    from zeroos.platform import memory
+
+    monkeypatch.setattr(
+        "zeroos.agent.notice.candidates", lambda client, messages: ["a noticed fact"]
+    )
+    session, _, _ = build_session(
+        [FakeMessage(content="One."), FakeMessage(content="Two.")],
+        [],
+        ask=lambda rows: [False] * len(rows),
+    )
+    session.send("hi")
+    session.send("again")
+    assert memory.load() == []
+
+
+def test_an_approved_candidate_is_logged_as_an_ordinary_remember(home, monkeypatch):
+    # A candidate must go through _run, not store.add directly, or the log
+    # would fail to show it as one of ZeroOS's own actions.
+    written = []
+    monkeypatch.setattr(
+        session_module.log, "record",
+        lambda name, arguments, tier, verdict, result: written.append((name, verdict)),
+    )
+    monkeypatch.setattr(
+        "zeroos.agent.notice.candidates", lambda client, messages: ["a noticed fact"]
+    )
+    session, _, _ = build_session(
+        [FakeMessage(content="One."), FakeMessage(content="Two.")], [],
+        ask=lambda rows: [True] * len(rows),
+    )
+    session.send("hi")
+    session.send("again")
+    assert written == [("remember", "executed")]
+
+
+def test_a_declined_candidate_is_logged_as_declined(home, monkeypatch):
+    written = []
+    monkeypatch.setattr(
+        session_module.log, "record",
+        lambda name, arguments, tier, verdict, result: written.append((name, verdict)),
+    )
+    monkeypatch.setattr(
+        "zeroos.agent.notice.candidates", lambda client, messages: ["a noticed fact"]
+    )
+    session, _, _ = build_session(
+        [FakeMessage(content="One."), FakeMessage(content="Two.")], [],
+        ask=lambda rows: [False] * len(rows),
+    )
+    session.send("hi")
+    session.send("again")
+    assert written == [("remember", "declined")]
+
+
+def test_candidates_are_offered_once_and_not_again(home, monkeypatch):
+    # _pending is drained before it is offered. Offering twice would ask the
+    # user about a fact they already answered.
+    replies = iter([["a noticed fact"], [], []])
+    monkeypatch.setattr(
+        "zeroos.agent.notice.candidates", lambda client, messages: next(replies)
+    )
+    seen = []
+    session, _, _ = build_session(
+        [FakeMessage(content="One."), FakeMessage(content="Two."), FakeMessage(content="Three.")],
+        [],
+        ask=lambda rows: (seen.append(list(rows)), [False] * len(rows))[1],
+    )
+    session.send("a")
+    session.send("b")
+    session.send("c")
+    assert len(seen) == 1
