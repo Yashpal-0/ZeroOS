@@ -11,6 +11,7 @@ from pathlib import Path
 from zeroos.platform import paths
 
 REFUSAL_MESSAGE = "That location is off limits."
+ROOT_REFUSAL_MESSAGE = "I can't do that to your whole home folder."
 
 
 class Refused(Exception):
@@ -32,6 +33,18 @@ def denied_roots() -> tuple[Path, ...]:
         # data base itself so this tracks XDG_DATA_HOME the same way.
         paths.data_dir().parent / "keyrings",
     )
+
+
+def refuse_root(target: Path) -> None:
+    """Guard for destructive operations, which must not target the whole home.
+
+    resolve() maps "", ".", and "~" to the sandbox root, all legitimately —
+    list_folder("~") is a normal request. Trashing or moving that same root is
+    not, so the operations that consume a file rather than read it call this on
+    their target before touching it.
+    """
+    if target == paths.home().resolve():
+        raise Refused(ROOT_REFUSAL_MESSAGE)
 
 
 def resolve(raw: str) -> Path:

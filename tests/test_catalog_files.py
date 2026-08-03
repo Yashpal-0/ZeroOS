@@ -208,3 +208,16 @@ def test_trailing_docstring_prose_stays_in_the_description():
 
     assert "Only use this for text" in sample.description
     assert sample.input_schema["properties"]["path"]["description"] == "The thing."
+
+
+@pytest.mark.parametrize("whole_home", ["", ".", "~"])
+def test_the_home_folder_itself_cannot_be_trashed_or_moved(tools, home, whole_home):
+    """resolve() maps all three to the sandbox root, legitimately — but trashing
+    or moving that root takes everything the user owns with it."""
+    registry, _ = tools
+    assert "whole home folder" in call(registry, "trash_file", path=whole_home)
+    assert "whole home folder" in call(
+        registry, "move_file", source=whole_home, destination=str(home / "Documents" / "x")
+    )
+    assert (home / "Documents").exists()
+    assert (home / "Downloads").exists()

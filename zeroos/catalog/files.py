@@ -16,7 +16,7 @@ from zeroos.catalog.tool import _UNEXPECTED, tool
 
 from zeroos.platform import files as platform_files
 from zeroos.policy.gate import Verdict
-from zeroos.policy.sandbox import Refused, resolve
+from zeroos.policy.sandbox import Refused, refuse_root, resolve
 
 
 def _guard(gate, name, arguments):
@@ -202,6 +202,7 @@ def bind(gate):
             return blocked
         try:
             target = resolve(path)
+            refuse_root(target)
             platform_files.trash(target)
         except Refused as refused:
             return refused.message
@@ -232,6 +233,7 @@ def _transfer(gate, operation, name, source, destination, verb):
         return blocked
     try:
         origin = resolve(source)
+        refuse_root(origin)
         target = resolve(destination)
         operation(origin, target)
     except Refused as refused:
