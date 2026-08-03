@@ -39,15 +39,16 @@ a scheduler guessing at intent.
 
 Each phase assumes the one before it shipped and was used by real people.
 
-### v0.1 — Local desktop agent *(current)*
+### v0.1 — Local desktop agent *(shipped)*
 
 Text in, sixteen curated actions, batched permission dialog, GTK4 + Flatpak, Linux
 only. Bring-your-own API key.
 
 Success is a non-technical tester completing file and app tasks without a terminal.
-Full criteria in the spec.
+Full criteria in the spec. Acceptance:
+[`docs/acceptance-2026-v01.md`](acceptance-2026-v01.md).
 
-### v0.2 — Memory and recall
+### v0.2 — Memory and recall *(current)*
 
 Conversation persists across sessions. The agent remembers stated preferences
 ("my documents live in ~/Work") and prior context.
@@ -57,6 +58,21 @@ inspects and deletes memory, and what memory does to prompt size. v0.1 sends a f
 prefix and does not cache. Memory makes the prefix grow and vary per session, which is
 both the thing that raises cost and the thing that would defeat caching if it is ever
 added — so memory belongs *after* the fixed block, not inside it.
+
+**Built.** Three kinds of persistence, deliberately separated: a capped list of
+approved facts (injected every turn as a *second* system message, so the fixed
+block stays byte-identical and a future cache breakpoint stays possible), a
+transcript that is displayed but never sent, and a usage line of counts only.
+`remember` and `forget` are both confirm-tier — memory adds no new action
+surface, but it does let attacker-controlled file text persist into a
+privileged position, and an automatic `forget` would let injected text erase a
+constraining memory. The recall pane exists so a carelessly-approved fact is
+removable without a terminal. Catalog is now eighteen tools; suite 276 passing.
+
+**Not yet accepted.** The mechanical criteria are settled; the §6 attack walk,
+the Flatpak runtime migration, and the two-day tester are not. See
+[`docs/acceptance-2026-v02.md`](acceptance-2026-v02.md) — criterion 9 is the
+one that decides whether memory is a feature or a liability.
 
 Specified in
 [`docs/superpowers/specs/2026-08-03-zeroos-v02-design.md`](superpowers/specs/2026-08-03-zeroos-v02-design.md).
