@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3584e4"/>
+      <stop offset="1" stop-color="#1c71d8"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#bg)"/>
+  <!-- The zero: the name, and the empty ring the assistant speaks from. -->
+  <ellipse cx="64" cy="62" rx="26" ry="32" fill="none" stroke="#ffffff" stroke-width="9"/>
+  <!-- Speech tail: it answers you. -->
+  <path d="M50 96 L50 112 L66 98 Z" fill="#ffffff"/>
+</svg>
