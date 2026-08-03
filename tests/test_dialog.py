@@ -129,6 +129,18 @@ def test_deny_response_returns_all_false_regardless_of_checks():
     assert result == [False, False, False]
 
 
+def test_a_long_row_wraps_instead_of_running_off_the_dialog():
+    # A CheckButton label does not wrap by default, and a fact long enough to
+    # need it asks for a row several times wider than the dialog. Wrapping is
+    # what keeps the whole sentence readable, and the whole sentence is what
+    # the user is consenting to.
+    row = "Remember: " + "a very long standing preference " * 12
+    _, dialog = _ask_and_drive([row], lambda d, checks: d.emit("response", "deny"))
+    label = _checks_of(dialog)[0].get_last_child()
+    assert label.get_wrap()
+    assert label.get_text() == row
+
+
 def test_dismissal_routes_to_deny():
     # Esc and the window X are not scriptable here; set_close_response("deny")
     # is the assertable proxy that the dialog would treat a dismissal as a

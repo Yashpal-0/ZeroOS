@@ -33,6 +33,13 @@ def ask_on_main_thread(window, rows: list[str]) -> list[bool]:
         for row in rows:
             check = Gtk.CheckButton(label=row, active=True)
             check.set_property("margin-start", 6)
+            # A CheckButton's label does not wrap by default. describe_batch
+            # caps a remember row at 213 characters, which still measures
+            # 1932px on one line — far wider than the dialog can ever be — so
+            # what the user sees is a sentence running off the edge. A row you
+            # cannot read is not consent.
+            check.get_last_child().set_wrap(True)
+            check.get_last_child().set_xalign(0)
             checks.append(check)
             box.append(check)
         dialog.set_extra_child(box)
