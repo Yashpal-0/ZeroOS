@@ -17,7 +17,7 @@ class Asker:
 
     def __init__(self, answer=True):
         self.answer = answer
-        self.calls: list[list[str]] = []
+        self.calls: list[list[tuple[str, bool]]] = []
 
     def __call__(self, rows):
         self.calls.append(list(rows))
@@ -180,11 +180,45 @@ def test_a_relative_path_still_shows_its_folder(home):
     g.prepare(
         [("move_file", {"source": "Downloads/Tax 2025/a.pdf", "destination": "Documents/a.pdf"})]
     )
-    assert asker.calls[0] == ["Move a.pdf from Downloads / Tax 2025 into Documents"]
+    assert asker.calls[0] == [("Move a.pdf from Downloads / Tax 2025 into Documents", True)]
 
 
 def test_a_bare_filename_shows_the_home_folder(home):
     asker = Asker()
     g = gate.Gate(asker)
     g.prepare([("write_text_file", {"path": "notes.txt", "content": "x"})])
-    assert asker.calls[0] == ["Save a note called notes.txt in Home"]
+    assert asker.calls[0] == [("Save a note called notes.txt in Home", True)]
+
+
+def test_a_remember_row_is_offered_unticked(home):
+    # Spec section 5. The dialog is v0.2 section 6's primary defence, and v0.3
+    # puts rows in front of the user that the user did not ask for. An unread
+    # row must store nothing, so memory rows arrive unticked while action rows
+    # stay pre-ticked.
+    seen = []
+
+    def ask(rows):
+        seen.append(list(rows))
+        return [False] * len(rows)
+
+    g = gate.Gate(ask)
+    g.prepare([("remember", {"text": "a fact"}), ("trash_file", {"path": "note.txt"})])
+
+    defaults = {text.split(":")[0]: ticked for text, ticked in seen[0]}
+    assert defaults["Remember"] is False
+    assert any(ticked for text, ticked in seen[0] if not text.startswith("Remember"))
+
+
+def test_an_unprepared_remember_is_also_offered_unticked(home):
+    # decide()'s unprepared-call branch asks rather than denying, so it is a
+    # second door into the same dialog. It must default the same way.
+    seen = []
+
+    def ask(rows):
+        seen.append(list(rows))
+        return [False]
+
+    g = gate.Gate(ask)
+    g.decide("remember", {"text": "a fact"})
+
+    assert seen[0][0][1] is False

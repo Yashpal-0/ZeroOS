@@ -18,8 +18,14 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 from zeroos.policy.describe import TRASH_REASSURANCE  # noqa: E402
 
 
-def ask_on_main_thread(window, rows: list[str]) -> list[bool]:
-    """Show the dialog from any thread and block until the user answers."""
+def ask_on_main_thread(window, rows: list[tuple[str, bool]]) -> list[bool]:
+    """Show the dialog from any thread and block until the user answers.
+
+    Each row arrives paired with the state its box starts in. Memory rows
+    arrive unticked (spec section 5): v0.3 puts rows here that the user did
+    not ask for, and an unread dialog must store nothing rather than
+    everything. The gate decides the state; this function only renders it.
+    """
     answered = threading.Event()
     outcome: list[bool] = [False] * len(rows)
 
@@ -30,14 +36,14 @@ def ask_on_main_thread(window, rows: list[str]) -> list[bool]:
         )
         checks = []
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        for row in rows:
-            check = Gtk.CheckButton(label=row, active=True)
+        for row, ticked in rows:
+            check = Gtk.CheckButton(label=row, active=ticked)
             check.set_property("margin-start", 6)
             # A CheckButton's label does not wrap by default. describe_batch
-            # caps a remember row at 213 characters, which still measures
-            # 1932px on one line — far wider than the dialog can ever be — so
-            # what the user sees is a sentence running off the edge. A row you
-            # cannot read is not consent.
+            # caps a remember row at about 313 characters, which still runs far
+            # wider than the dialog can ever be on one line, so what the user
+            # sees is a sentence running off the edge. A row you cannot read is
+            # not consent.
             check.get_last_child().set_wrap(True)
             check.get_last_child().set_xalign(0)
             checks.append(check)

@@ -95,18 +95,22 @@ def test_confirm_label_for_three_rows():
 
 
 def test_dialog_body_is_the_trash_reassurance():
-    _, dialog = _ask_and_drive(["a", "b", "c"], lambda d, checks: d.emit("response", "deny"))
+    _, dialog = _ask_and_drive(
+        [("a", True), ("b", True), ("c", True)], lambda d, checks: d.emit("response", "deny")
+    )
     assert dialog.get_body() == TRASH_REASSURANCE
 
 
 def test_button_labels_for_one_row():
-    _, dialog = _ask_and_drive(["a"], lambda d, checks: d.emit("response", "deny"))
+    _, dialog = _ask_and_drive([("a", True)], lambda d, checks: d.emit("response", "deny"))
     assert dialog.get_response_label("deny") == "Deny all"
     assert dialog.get_response_label("allow") == "Do it"
 
 
 def test_button_labels_for_three_rows():
-    _, dialog = _ask_and_drive(["a", "b", "c"], lambda d, checks: d.emit("response", "deny"))
+    _, dialog = _ask_and_drive(
+        [("a", True), ("b", True), ("c", True)], lambda d, checks: d.emit("response", "deny")
+    )
     assert dialog.get_response_label("deny") == "Deny all"
     assert dialog.get_response_label("allow") == "Do these 3 things"
 
@@ -116,7 +120,7 @@ def test_allow_response_maps_unticked_middle_row_to_false():
         checks[1].set_active(False)
         dialog.emit("response", "allow")
 
-    result, _ = _ask_and_drive(["a", "b", "c"], act)
+    result, _ = _ask_and_drive([("a", True), ("b", True), ("c", True)], act)
     assert result == [True, False, True]
 
 
@@ -125,8 +129,23 @@ def test_deny_response_returns_all_false_regardless_of_checks():
         checks[1].set_active(False)
         dialog.emit("response", "deny")
 
-    result, _ = _ask_and_drive(["a", "b", "c"], act)
+    result, _ = _ask_and_drive([("a", True), ("b", True), ("c", True)], act)
     assert result == [False, False, False]
+
+
+def test_a_row_offered_unticked_starts_unticked():
+    # A row the user never reads must store nothing. That is the whole of the
+    # spec section 5 argument, and it lives in one GTK property.
+    states = []
+
+    def act(dialog, checks):
+        states.extend(check.get_active() for check in checks)
+        dialog.emit("response", "deny")
+
+    _ask_and_drive(
+        [('Remember: "a fact"', False), ("Move note.txt to the trash", True)], act
+    )
+    assert states == [False, True]
 
 
 def test_a_long_row_wraps_instead_of_running_off_the_dialog():
@@ -135,7 +154,7 @@ def test_a_long_row_wraps_instead_of_running_off_the_dialog():
     # what keeps the whole sentence readable, and the whole sentence is what
     # the user is consenting to.
     row = "Remember: " + "a very long standing preference " * 12
-    _, dialog = _ask_and_drive([row], lambda d, checks: d.emit("response", "deny"))
+    _, dialog = _ask_and_drive([(row, True)], lambda d, checks: d.emit("response", "deny"))
     label = _checks_of(dialog)[0].get_last_child()
     assert label.get_wrap()
     assert label.get_text() == row
@@ -145,5 +164,5 @@ def test_dismissal_routes_to_deny():
     # Esc and the window X are not scriptable here; set_close_response("deny")
     # is the assertable proxy that the dialog would treat a dismissal as a
     # rejection rather than a missing answer.
-    _, dialog = _ask_and_drive(["a"], lambda d, checks: d.emit("response", "deny"))
+    _, dialog = _ask_and_drive([("a", True)], lambda d, checks: d.emit("response", "deny"))
     assert dialog.get_close_response() == "deny"

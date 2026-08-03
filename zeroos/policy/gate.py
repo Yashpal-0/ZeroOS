@@ -24,6 +24,17 @@ from zeroos.policy.tiers import PATH_ARGUMENTS, Tier, tier_of
 
 DENIED_MESSAGE = "The user declined this action."
 
+# Memory rows arrive unticked; everything else arrives ticked. The distinction
+# is not "did the user ask for this" — that would mean trusting the model's
+# report of who asked, and injected file text can claim the user asked. So no
+# remember row is exempt, including one the user requested out loud. Spec
+# section 5.
+_UNTICKED_BY_DEFAULT = {"remember"}
+
+
+def _default_tick(name: str) -> bool:
+    return name not in _UNTICKED_BY_DEFAULT
+
 
 class Verdict(Enum):
     ALLOW = "allow"
@@ -63,7 +74,7 @@ def _resolve_arguments(name: str, arguments: dict) -> dict | None:
 
 
 class Gate:
-    def __init__(self, ask: Callable[[list[str]], list[bool]]) -> None:
+    def __init__(self, ask: Callable[[list[tuple[str, bool]]], list[bool]]) -> None:
         self._ask = ask
         self._ledger: dict[tuple, list[Verdict]] = defaultdict(list)
 
@@ -96,7 +107,14 @@ class Gate:
             return
 
         rows = describe.group_batch(shown)
-        answers = self._ask([text for text, _ in rows])
+        # A row may cover several calls (group_batch collapses runs), so it is
+        # ticked by default only if every call under it is.
+        answers = self._ask(
+            [
+                (text, all(_default_tick(pending[i][0]) for i in covered))
+                for text, covered in rows
+            ]
+        )
 
         # The gate never invents a verdict. Every DENY here traces to a row the
         # user actually rejected — an unticked box, or a dismissed dialog, which
@@ -130,7 +148,9 @@ class Gate:
             return Verdict.REFUSE, REFUSAL_MESSAGE
         if tier is Tier.AUTO:
             return Verdict.ALLOW, ""
-        answers = self._ask(describe.describe_batch([(name, resolved)]))
+        answers = self._ask(
+            [(row, _default_tick(name)) for row in describe.describe_batch([(name, resolved)])]
+        )
         # Same contract, same loudness as prepare(). One row was shown, so one
         # answer must come back; treating an absent answer as DENY would deny an
         # action on behalf of a user whose dialog malfunctioned.
