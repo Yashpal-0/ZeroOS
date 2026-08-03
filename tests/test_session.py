@@ -53,6 +53,7 @@ def tool_call(id_, name, **arguments):
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     monkeypatch.setenv("ZEROOS_HOME", str(tmp_path))
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
     (tmp_path / "Downloads").mkdir()
     (tmp_path / "Documents").mkdir()
     (tmp_path / "Downloads" / "a.pdf").write_text("x")

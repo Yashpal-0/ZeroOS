@@ -94,7 +94,8 @@ def test_the_fifty_first_fact_is_refused_and_invites_a_consolidation():
     assert str(memory.MAX_FACTS) in result
     assert "forget" in result.lower()
     assert "remember" in result.lower()
-    assert "approve" in result.lower() or "user" in result.lower()
+    assert "propose" in result.lower()
+    assert "approve" in result.lower()
 
 
 def test_forget_removes_the_fact():

@@ -152,7 +152,13 @@ def test_refuses_config_dir_under_a_relocated_xdg_config_home(tmp_path, monkeypa
 
 
 def test_the_memory_file_is_denied_under_a_relocated_data_home(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("ZEROOS_HOME", str(home))
+    xdg_data = home / "xdg_data"
+    xdg_data.mkdir()
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_data))
+
     from zeroos.platform import memory
 
     with pytest.raises(sandbox.Refused):
