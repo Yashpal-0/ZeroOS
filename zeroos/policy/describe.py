@@ -5,7 +5,7 @@ Spec section 4.4: folder names not paths, counts not lists, no jargon.
 
 from pathlib import Path
 
-from zeroos.platform import paths
+from zeroos.platform import memory, paths
 
 TRASH_REASSURANCE = (
     "Files moved to the trash can be restored. ZeroOS never permanently deletes anything."
@@ -40,6 +40,13 @@ def _verb(tool: str) -> str:
     return "Move" if tool == "move_file" else "Copy"
 
 
+def _for_display(text: str) -> str:
+    """Cap the row length. The tool's own MAX_CHARS check runs after the
+    dialog has been answered, so it cannot keep this short."""
+    text = memory.normalise(text)
+    return text if len(text) <= memory.MAX_CHARS else text[: memory.MAX_CHARS] + "…"
+
+
 def _single(tool: str, args: dict) -> str:
     if tool == "create_folder":
         return f"Create a folder called {_name(args['path'])} in {_folder(args['path'])}"
@@ -49,6 +56,13 @@ def _single(tool: str, args: dict) -> str:
         return f"Move {_name(args['path'])} to the trash"
     if tool == "write_clipboard":
         return "Put some text on your clipboard"
+    if tool == "remember":
+        return f'Remember: "{_for_display(args.get("text", ""))}"'
+    if tool == "forget":
+        text = memory.text_of(args.get("fact_id", ""))
+        if text is None:
+            return "Forget something that is no longer remembered"
+        return f'Forget: "{_for_display(text)}"'
     if tool in _COLLAPSIBLE:
         return (
             f"{_verb(tool)} {_name(args['source'])} from {_folder(args['source'])} "

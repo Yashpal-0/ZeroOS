@@ -1,5 +1,6 @@
 import pytest
 
+from zeroos.platform import memory
 from zeroos.policy import describe
 
 
@@ -7,6 +8,11 @@ from zeroos.policy import describe
 def home(tmp_path, monkeypatch):
     monkeypatch.setenv("ZEROOS_HOME", str(tmp_path))
     return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def data_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
 
 
 def test_pretty_strips_the_home_prefix(home):
@@ -90,3 +96,58 @@ def test_group_batch_covers_every_call_exactly_once(home):
     ]
     covered = [i for _, indices in describe.group_batch(calls) for i in indices]
     assert sorted(covered) == list(range(len(calls)))
+
+
+def test_remember_shows_the_text_being_stored():
+    row = describe.describe_batch(
+        [("remember", {"text": "My documents live in the Work folder"})]
+    )[0]
+    assert row == 'Remember: "My documents live in the Work folder"'
+
+
+def test_remember_shows_the_normalised_text_that_will_be_stored():
+    row = describe.describe_batch([("remember", {"text": "a\n\nb"})])[0]
+    assert row == 'Remember: "a b"'
+
+
+def test_forget_resolves_the_id_to_the_facts_text():
+    fact_id = memory.add("My documents live in the Work folder")
+    row = describe.describe_batch([("forget", {"fact_id": fact_id})])[0]
+    assert row == 'Forget: "My documents live in the Work folder"'
+
+
+def test_forget_never_shows_a_bare_id():
+    fact_id = memory.add("something")
+    row = describe.describe_batch([("forget", {"fact_id": fact_id})])[0]
+    assert fact_id not in row
+
+
+def test_forget_an_unknown_id_says_so_in_plain_words():
+    row = describe.describe_batch([("forget", {"fact_id": "deadbeef"})])[0]
+    assert row == "Forget something that is no longer remembered"
+
+
+def test_no_memory_row_says_run():
+    rows = describe.describe_batch(
+        [("remember", {"text": "x"}), ("forget", {"fact_id": "deadbeef"})]
+    )
+    assert not any(row.startswith("Run ") for row in rows)
+
+
+def test_a_memory_row_is_always_one_line():
+    row = describe.describe_batch([("remember", {"text": "first\nsecond"})])[0]
+    assert "\n" not in row
+
+
+def test_memory_rows_do_not_collapse_into_a_count():
+    rows = describe.describe_batch([("remember", {"text": f"fact {n}"}) for n in range(4)])
+    assert len(rows) == 4
+
+
+def test_an_enormous_remember_is_truncated_for_display():
+    """The tool's MAX_CHARS check runs after the dialog. Without truncation
+    here a 10 KB argument becomes a 10 KB row, and the row is what spec §6
+    asks the user to read."""
+    row = describe.describe_batch([("remember", {"text": "x" * 10_000})])[0]
+    assert len(row) < memory.MAX_CHARS + 40
+    assert row.endswith('…"')
