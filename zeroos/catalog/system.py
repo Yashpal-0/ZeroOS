@@ -43,7 +43,7 @@ def bind(gate):
 
     @tool
     def set_volume(percent: int) -> str:
-        """Set the system output volume.
+        """Set the loudness of this computer's speakers or headphones.
 
         Args:
             percent: Loudness from 0 to 100. Values outside that range are

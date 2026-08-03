@@ -109,10 +109,12 @@ def bind(gate):
 
     @tool
     def create_folder(path: str) -> str:
-        """Create a new folder.
+        """Create a new folder in the user's home directory.
 
         Args:
             path: Where to create it, including the new folder's name.
+
+        Parent folders are created too if they are missing.
         """
         blocked = _guard(gate, "create_folder", {"path": path})
         if blocked:

@@ -25,11 +25,14 @@ def bind(gate):
 
     @tool
     def open_app(name: str) -> str:
-        """Launch an application.
+        """Open an application the user already has installed.
 
         Args:
             name: The application's name as it appears in the user's
                 launcher, for example "Firefox" or "Rhythmbox".
+
+        Use list_apps first when the user's wording might not match what the
+        application is actually called.
         """
         verdict, message = gate.decide("open_app", {"name": name})
         if verdict is not Verdict.ALLOW:
