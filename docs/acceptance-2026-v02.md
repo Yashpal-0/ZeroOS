@@ -3,22 +3,21 @@
 Spec §13 sets nine success criteria. This document records the evidence for
 each.
 
-> **Status: no evidence yet. v0.2 is unimplemented.**
+> **Status: the mechanical criteria are settled. The human ones are not.**
 >
-> At the time of writing, `zeroos/platform/memory.py`, `zeroos/agent/history.py`,
-> `zeroos/agent/usage.py`, `zeroos/catalog/memory.py`, `zeroos/platform/settings.py`
-> and `zeroos/surface/recall.py` do not exist, and the suite stands at the v0.1
-> baseline of **170 passed, 0 failed**. Every criterion below is therefore
-> **PENDING**, and each one names the test or the manual step that will settle
-> it. This is the sheet to fill in while running
-> [`docs/superpowers/plans/2026-08-03-zeroos-v02.md`](superpowers/plans/2026-08-03-zeroos-v02.md)
-> Task 11 — not a record of a pass that happened.
+> Tasks 1–9 are implemented and committed. Criteria 1–6 are mechanical and are
+> recorded below as **PASS** with citations. Criterion 7 is half mechanical
+> (**PASS**) and half human (**PENDING**). Criterion 8 waits on Task 10, and
+> criterion 9 — the one spec §13 calls the real criterion — waits on a tester.
+> The §6 attack walk at the foot of this document has **not been run**, and
+> until it has, criteria 2 and 5 are necessary-but-not-sufficient.
 >
-> Replace each **PENDING** with **PASS** or **FAIL** and the evidence, exactly
-> as [`docs/acceptance-2026-v01.md`](acceptance-2026-v01.md) does. A criterion
-> marked PASS without a citation is not a criterion, it is a hope.
+> Nothing here marked PASS is marked so without a citation. A criterion marked
+> PASS without a citation is not a criterion, it is a hope.
 
-**Suite state to record at HEAD:** `___ passed, ___ failed`.
+**Suite state at HEAD (`21fdd67`):** `276 passed, 0 failed`. (Warnings are
+pre-existing PyGObject/asyncio deprecation notices, unrelated to the product.)
+The v0.1 baseline was 170; v0.2 added 106 tests.
 
 **The seam to watch.** v0.1's acceptance pass found a defect no per-task review
 could see, because it lived between two tasks: `session._run` logged a
@@ -32,85 +31,147 @@ end — §6 below is that check, and it is the reason this document exists.
 
 ## Criterion 1 — The catalog has exactly eighteen functions, each with a tier and unit tests
 
-**PENDING (mechanical).**
+**PASS (mechanical).**
 
-Cite `tests/test_registry.py::test_the_catalog_has_exactly_eighteen_tools`
-(replaces v0.1's `..._sixteen_tools`) and `test_every_catalog_tool_has_a_tier`.
-`tests/test_catalog_memory.py` is the new module's own unit coverage. Record
-the suite total and confirm the v0.1 registry tests were updated rather than
-duplicated.
+`tests/test_registry.py::test_the_catalog_has_exactly_eighteen_tools` asserts
+`len(tools) == 18`; `test_every_catalog_tool_has_a_tier` asserts no tool is
+without a tier. `tests/test_registry.py`: 9/9 pass.
+`tests/test_catalog_memory.py` (15 tests) is the new module's own coverage.
+
+The v0.1 registry tests were **updated, not duplicated** — the sixteen-tool
+assertion became the eighteen-tool assertion in place. Across all of v0.2,
+exactly one pre-existing assertion line changed anywhere in the suite:
+`assert len(tools) == 16` → `== 18`.
 
 ## Criterion 2 — `remember` and `forget` are both `confirm`; no code path can execute either without a dialog
 
-**PENDING (mechanical, plus §6 below).**
+**PASS (mechanical). Not yet confirmed on screen — see §6 below.**
 
-Cite `tests/test_catalog_memory.py::test_both_tools_are_confirm_tier` and the
-denial-path tests driven with `DenyGate`. Mechanical evidence is necessary and
-not sufficient: the tier table being right does not prove a dialog reached the
-screen. §6 is what proves that.
+`tests/test_catalog_memory.py::test_both_tools_are_confirm_tier` pins the tier
+table; the denial-path tests driven with `DenyGate` confirm a refused verdict
+returns the denial message and writes nothing.
+
+One real defect was found and fixed here during Task 4: `remember()` keyed
+`gate.decide` on the *normalised* text while `gate.prepare` keys on the raw
+argument, so the ledger missed — producing a double-ask, and letting a denied
+call be re-asked under a different key. Fixed at the root, with a regression
+test driving the real `Gate`.
+
+As the sheet warned: the tier table being right does not prove a dialog reached
+the screen. **§6 is what proves that, and §6 has not been run.**
 
 ## Criterion 3 — `memory.jsonl`, `history.jsonl` and `usage.log` are unreachable by every sandboxed catalog function
 
-**PENDING (mechanical).**
+**PASS (mechanical).**
 
-Cite the additions to `tests/test_sandbox.py`, including
-`test_the_memory_file_is_denied_under_a_relocated_data_home`. The relocated
-`XDG_DATA_HOME` case is the one that matters: a sandbox that only denies the
-default path denies nothing an attacker with an environment cannot move.
+`tests/test_sandbox.py`: 20/20 pass, including
+`test_the_memory_file_is_denied_under_a_relocated_data_home`.
+
+That test was **initially vacuous and was rewritten**. As first written it
+passed via the containment check rather than the denylist — it still passed
+with `data_dir` removed from `denied_roots()` entirely, which is to say it
+proved nothing about the thing it was named for. It now mirrors the
+`test_refuses_config_dir` pattern and was proven two ways: it fails when
+`data_dir()` is stripped from `denied_roots()`, and passes when restored.
 
 ## Criterion 4 — With no memories stored, the outgoing request is byte-identical to v0.1's
 
-**PENDING (mechanical).**
+**PASS (mechanical).**
 
-Cite `tests/test_session.py::test_with_no_memories_there_is_exactly_one_system_message`.
-Also confirm the *pre-existing* v0.1 session tests still pass unmodified — if
-any needed editing to accommodate the second system message, the byte-identical
-guarantee was broken and the fix belongs in `session.py`, not in those tests.
-Record whether any were touched.
+`tests/test_session.py::test_with_no_memories_there_is_exactly_one_system_message`.
+
+**No pre-existing v0.1 session test was edited to accommodate the second system
+message.** Verified by diffing `tests/test_session.py` across the whole of v0.2
+(`git diff eb64468..HEAD`): the only removed line in the entire file is
+`assert len(tools) == 16`, which is criterion 1's tool-count change, not an
+accommodation. All 16 pre-existing session tests pass unmodified.
+
+Verified independently of the suite, in an isolated `ZEROOS_HOME`:
+`PROMPTS['sir'] is SYSTEM_PROMPT` → `True` (the same string object, not a
+copy), and `_memory_messages()` returns `[]` — not a blank message — on an
+empty store. So the no-memory request is `[system] + [] + messages`:
+structurally and bytewise v0.1's.
+
+The guarantee has two independent pins, neither weakened: `test_prompt.py`
+holds a literal copy of v0.1's prompt text (the *content* pin), and
+`test_session.py::test_the_system_prompt_leads_every_request` asserts what is
+actually sent (the *wiring* pin).
+
+Two-way proven: returning `[{"role": "system", "content": MEMORY_PREFACE}]`
+instead of `[]` on an empty store fails this criterion's test.
 
 ## Criterion 5 — The approval dialog shows the full text of what is being remembered, and of what is being forgotten
 
-**PENDING (mechanical, plus §6 below).**
+**PASS (mechanical). Not yet confirmed on screen — see §6 below.**
 
-Cite `tests/test_describe.py::test_remember_shows_the_text_being_stored`,
+`tests/test_describe.py`: 21/21 pass, including
+`test_remember_shows_the_text_being_stored`,
 `test_forget_resolves_the_id_to_the_facts_text`,
 `test_forget_never_shows_a_bare_id`, and
 `test_an_enormous_remember_is_truncated_for_display`.
 
-The truncation test is not cosmetic. `gate.prepare` renders every row *before*
-any tool body runs, so `catalog/memory.py`'s `MAX_CHARS` check cannot keep a
-row short — without the display-layer cut, a 10 KB argument becomes a 10 KB
-row. Record what an oversized `remember` actually looked like on screen during
-§6, not just that the test passed.
+`test_forget_never_shows_a_bare_id` was **strengthened after review**: as
+written it asserted only `fact_id not in row`, which is true of the old
+`"Run forget"` fallthrough with zero forget-specific code, and stays true for
+any wrong implementation that merely avoids embedding the hex id. It now
+asserts exact equality, proven two ways — replacing the `forget` branch with a
+hardcoded id-free string fails it.
+
+Measured, against the real implementation: a 10,000-character `remember`
+produces a row of **213 characters** (200 of text, an ellipsis, and the
+`Remember: "` framing). The truncation lives in the display layer because
+`gate.prepare` renders every row *before* any tool body runs, so
+`catalog/memory.py`'s `MAX_CHARS` check cannot bound it.
+
+**Still to record during §6:** what an oversized `remember` actually looks
+like on screen. 213 characters is a number, not a legible dialog.
 
 ## Criterion 6 — History is persisted, displayed, and provably never sent to the model
 
-**PENDING (mechanical).**
+**PASS (mechanical).**
 
-Cite `tests/test_session.py::test_history_never_reaches_the_model`. Confirm it
-asserts on the whole request body (`repr(request)`), not on a flag — a flag
-only proves that whoever set the flag believed it. Also cite
-`tests/test_history.py` for persistence and `tests/test_recall.py::test_past_turns_are_shown_newest_first`
-for display.
+`tests/test_session.py::test_history_never_reaches_the_model` asserts against
+`repr(request)` — the **whole outgoing request body**, not a flag. This was
+checked specifically, because a flag only proves that whoever set the flag
+believed it.
+
+Two-way proven: leaking a history turn's text into the memory block fails it.
+
+Persistence: `tests/test_history.py`, 10/10 — including the 500-turn cap
+(asserting both the count *and* which turns survived), corrupt-line skipping,
+and an unreadable file loading as empty. Display:
+`tests/test_recall.py::test_past_turns_are_shown_newest_first`.
+
+Structurally, nothing in `session.py` reads `history` at all. The only call is
+the write in `send()`.
 
 ## Criterion 7 — A user can see every remembered fact and delete any of them without opening a terminal
 
-**PENDING (mechanical + human).**
+**Mechanical half: PASS. Human half: PENDING.**
 
-Cite `tests/test_recall.py::test_every_remembered_fact_is_shown`,
+`tests/test_recall.py`: 10/10 pass, including
+`test_every_remembered_fact_is_shown`,
 `test_deleting_a_fact_removes_it_from_the_store`, and
 `test_a_fact_containing_markup_is_shown_as_text`.
 
-The markup test is load-bearing. `Adw.PreferencesRow:use-markup` defaults to
-**TRUE** — the opposite of the dialog's `Gtk.CheckButton` rows — so a fact
-containing `<span foreground="…">` renders invisible unless every row sets
-`use_markup=False` explicitly. An invisible fact in the pane that exists to
-make facts deletable is a failure of this criterion even with the store
-working perfectly. Verify it once by eye in the installed app, not only in the
-test.
+The markup test is load-bearing and **two-way proven**:
+`Adw.PreferencesRow:use-markup` defaults to **TRUE** — the opposite of the
+dialog's `Gtk.CheckButton` rows — and removing `use_markup=False` from the
+fact rows and the history rows fails both markup tests. A fact containing
+`<span foreground="…">` would otherwise render invisible in the one screen
+that exists so the user can find and delete it.
 
-The human half: find the pane from a cold start, without being told where it
-is. Record how long it took.
+One test beyond the plan was added here: the brief pinned markup for fact rows
+only, but history rows carry the same attacker-influenced text — a reply
+quoting a file's contents lands in those rows verbatim.
+
+> **Caveat — nobody has looked at this pane.** It is verified entirely by
+> widget-tree assertions: labels exist, in the right order, with markup off.
+> No test proves the delete buttons are reachable, legible, or that the pane
+> is comprehensible. Confirm by eye during §6.
+
+**The human half, still to run:** find the pane from a cold start, without
+being told where it is. Record how long it took.
 
 ## Criterion 8 — The Flatpak builds and runs on a supported runtime
 
@@ -211,5 +272,43 @@ here which v0.2 closed.
    as shipped; swapping to explicit `raise` would make it independent of how
    the app is launched. Not scheduled in v0.2.
 6. **Unexplained `test_session.py` flakiness** — did not reproduce at v0.1
-   HEAD. Task 8 rewrites that file's neighbourhood; if it reappears, it is no
-   longer safe to leave open.
+   HEAD. **Did not reappear during v0.2**, which rewrote that file's
+   neighbourhood and grew it from 16 tests to 29. Not observed once across the
+   full v0.2 implementation. Still not explained, so still open, but the
+   evidence against it is now considerably stronger.
+
+---
+
+## Findings carried into the whole-branch review
+
+Recorded here because no per-task review could settle them, and criterion 9's
+tester should not be the first to meet them.
+
+1. **Consolidation turn ordering.** At the 50-fact cap, `remember()` returns a
+   message inviting the model to propose a consolidation; the model then issues
+   `forget` + `remember` calls, all confirm-tier, all in one dialog. If a
+   consolidation turn emits `remember(merged)` *before* its `forget()`s, the
+   merged `remember` hits the cap message and the user gets only the
+   destructive half of what they ticked. Judged recoverable — nothing is erased
+   without a tick, the model is told what happened, and it can re-issue next
+   turn — and enforcing an order would be the consolidation machinery that was
+   deliberately not built. The cap message's own word order ("then forget the
+   old ones and remember the merged one") prescribes the safe sequence.
+
+2. **`gate.prepare`'s ledger key.** `prepare` keys on the model's full argument
+   dict while a tool body keys on what `Tool.call` accepted, so an unknown
+   extra key from the model causes a ledger miss. **Pre-existing** — it affects
+   all six v0.1 confirm tools identically via `files.py`'s `_guard`. Not
+   introduced by v0.2, and not fixed by it.
+
+3. **No cap backstop in `memory.add()`.** Cap enforcement lives entirely in
+   `catalog/memory.py`. Task 4's review confirmed every `add()` call site is
+   gated. A future second caller would not be.
+
+4. **A brief whose tests could not pass.** Task 9's brief walked the widget
+   tree of an `Adw.PreferencesDialog` before presenting it, where it has zero
+   children — so five of its tests failed against a correct implementation. The
+   tests were fixed rather than the pane contorted to match them. Noted because
+   it is the inverse of this plan's other recurring defect (five instances of
+   tests that could not *fail*), and both are failures of the same kind: a test
+   whose result was decided before the code was written.
