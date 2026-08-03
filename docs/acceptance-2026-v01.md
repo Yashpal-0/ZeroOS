@@ -6,9 +6,18 @@ against the test suite at HEAD `c1b32e5`. Criteria 4, 5, and 6 require a
 human at the machine — a clean install, an onboarding run, and a real
 non-technical tester — and are left blank here pending that pass.
 
-**Suite state at HEAD:** `169 passed, 0 failed` across three consecutive runs
-of `python -m pytest -q`. (Warnings are pre-existing PyGObject/asyncio
-deprecation notices, unrelated to the product.)
+**Suite state at HEAD:** `170 passed, 0 failed`. (Warnings are pre-existing
+PyGObject/asyncio deprecation notices, unrelated to the product.)
+
+A final whole-branch review ran after the per-task reviews and found one
+cross-cutting defect, now fixed in `d52e27b`: `session._run` classified a
+`refuse_root` block as `"executed"` in the action log, because the sandbox
+raises two different refusal messages and only one was compared. The guard
+itself always held — the home folder was never touched — but the audit log
+claimed otherwise, which is the §6 lie the log exists to prevent. Neither
+scoped review could see it: `refuse_root` lives in the sandbox task and the
+comparison in the session task. The review verified the rest of the
+defense-in-depth chain holds end to end (see Open Items for what remains).
 
 ---
 
@@ -147,7 +156,14 @@ can only invoke the bounded `set_volume` tool, never `pactl` directly.
    emitted one. The batched dialog is therefore unproven against real
    batching. Decide: prompt-tune to elicit batching, or accept single-call
    behaviour (the gate degrades gracefully, but the feature goes unexercised).
-4. **Unexplained `test_session.py` flakiness.** A reviewer running the suite
+4. **Cheap hardening, not a blocker.** `gate.py`'s two consent guards are bare
+   `assert`s, which `python -O` / `PYTHONOPTIMIZE=1` would strip. The review
+   confirmed the Flatpak does **not** launch under `-O` (manifest
+   `command: zeroos`, desktop `Exec=zeroos`, no `PYTHONOPTIMIZE` in
+   `finish-args`), so the no-silent-denial guarantee holds in v0.1 as shipped.
+   Swapping both to explicit `if ...: raise RuntimeError(...)` would make that
+   independent of how the app is launched.
+5. **Unexplained `test_session.py` flakiness.** A reviewer running the suite
    from a BASE worktree saw 3 intermittent failures in `tests/test_session.py`.
    It does **not** reproduce at HEAD (4 consecutive clean runs of the full
    suite, 3 isolated runs of `test_session.py`, including with `-p no:randomly`).
