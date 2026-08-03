@@ -67,12 +67,16 @@ transcript that is displayed but never sent, and a usage line of counts only.
 surface, but it does let attacker-controlled file text persist into a
 privileged position, and an automatic `forget` would let injected text erase a
 constraining memory. The recall pane exists so a carelessly-approved fact is
-removable without a terminal. Catalog is now eighteen tools; suite 276 passing.
+removable without a terminal. Catalog is now eighteen tools; suite 281 passing.
 
-**Not yet accepted.** The mechanical criteria are settled; the §6 attack walk,
-the Flatpak runtime migration, and the two-day tester are not. See
+**Accepted except for the tester.** Criteria 1–8 are settled with citations.
+The Flatpak now runs on `org.gnome.Platform//50`, and the §6 attack walk has
+been run against the real model and a real dialog — it found one defect (an
+oversized approval row ran off the edge of the dialog unwrapped) which is
+fixed. What remains is criterion 9: two days with a non-technical tester. See
 [`docs/acceptance-2026-v02.md`](acceptance-2026-v02.md) — criterion 9 is the
-one that decides whether memory is a feature or a liability.
+one that decides whether memory is a feature or a liability, and nothing
+mechanical can stand in for it.
 
 Specified in
 [`docs/superpowers/specs/2026-08-03-zeroos-v02-design.md`](superpowers/specs/2026-08-03-zeroos-v02-design.md).

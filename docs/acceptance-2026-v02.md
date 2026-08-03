@@ -373,8 +373,12 @@ Still open in [`docs/acceptance-2026-v01.md`](acceptance-2026-v01.md); note
 here which v0.2 closed.
 
 1. **Criterion 4 menu launch** — launching from the applications menu, not a
-   terminal, was never recorded. Re-check after the Task 10 runtime bump, since
-   that rewrites the manifest.
+   terminal, was never recorded. **Still open after the runtime bump.** Task 10
+   confirmed `/app/bin/zeroos` exists and is executable inside the sandbox,
+   which is what makes the manifest's `command:` resolvable — but that is not a
+   menu launch, and criterion 8's PASS does not cover this. A `.desktop` entry
+   that fails to appear, or appears and does nothing, would pass every check
+   run so far.
 2. **Criterion 5, onboarding with a cleared keyring** — never run.
 3. **Criterion 6, the non-technical tester** — never run. Spec §1 states the
    cost plainly: shipping form-of-address in v0.2 means this pass waits for a
@@ -382,7 +386,10 @@ here which v0.2 closed.
 4. **The batching contradiction** — `qwen/qwen3.7-flash` emitted single tool
    calls in both Task 13 runs where §4.3 expected several, so the batched
    dialog is still unproven against real batching. v0.2 adds two more tools it
-   could batch with; record whether that changed anything.
+   could batch with, and **it changed nothing**: every gate call observed
+   across every real-model run in the §6 walk carried exactly one row. The
+   multi-row dialog remains proven only by tests that hand it several rows
+   directly. Still open.
 5. **`gate.py`'s bare `assert`s** — the two consent guards strip under
    `python -O`. The Flatpak does not launch under `-O`, so the guarantee holds
    as shipped; swapping to explicit `raise` would make it independent of how
