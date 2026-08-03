@@ -48,6 +48,69 @@ class _RecordingClipboard:
         self.handlers[name] = handler
 
 
+class _StubSession:
+    """Stands in for Session so the window can be built without an API key.
+    Records close() rather than writing a usage line."""
+
+    def __init__(self, *args, **kwargs):
+        self.closed = 0
+
+    def close(self):
+        self.closed += 1
+
+
+def _window(monkeypatch):
+    """A ChatWindow with its session stubbed out. Needs a display; the suite
+    already runs the dialog tests against one."""
+    gi.require_version("Adw", "1")
+    gi.require_version("Gtk", "4.0")
+    from gi.repository import Adw, Gtk
+
+    Adw.init()
+    monkeypatch.setattr(window, "Session", _StubSession)
+    app = Adw.Application(application_id="io.zerostic.ZeroOS.Test")
+    return window.ChatWindow(application=app, api_key="test"), Gtk
+
+
+def test_the_header_bar_has_a_button_that_opens_the_recall_pane(monkeypatch):
+    from zeroos.surface import recall
+
+    opened = []
+    monkeypatch.setattr(recall, "build", lambda parent: opened.append(parent) or _NoOpDialog())
+    chat, Gtk = _window(monkeypatch)
+
+    buttons = [w for w in _walk(chat) if isinstance(w, Gtk.Button)
+               and w.get_property("tooltip-text") == "What ZeroOS knows"]
+    assert len(buttons) == 1, "the header bar must offer exactly one way into the pane"
+    buttons[0].emit("clicked")
+    assert opened == [chat], "the button must actually build the pane, not just exist"
+
+
+def test_closing_the_window_records_the_session(monkeypatch):
+    chat, _ = _window(monkeypatch)
+    assert chat._session.closed == 0
+    chat.emit("close-request")
+    assert chat._session.closed == 1, (
+        "nothing else in the app calls close(), so an unwired close-request "
+        "means the usage line is never written"
+    )
+
+
+class _NoOpDialog:
+    def present(self, parent):
+        pass
+
+
+def _walk(widget):
+    found = []
+    child = widget.get_first_child()
+    while child is not None:
+        found.append(child)
+        found.extend(_walk(child))
+        child = child.get_next_sibling()
+    return found
+
+
 def test_text_from_outside_zeroos_reaches_read_clipboard(monkeypatch):
     monkeypatch.setattr(system, "_CLIPBOARD_MIRROR", {})
     window._on_clipboard_text(_FakeClipboard("copied in firefox"), None)

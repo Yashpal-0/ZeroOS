@@ -11,6 +11,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
 from zeroos.agent.session import Session  # noqa: E402
 from zeroos.platform.system import remember_clipboard  # noqa: E402
+from zeroos.surface import recall  # noqa: E402
 from zeroos.surface.dialog import ask_on_main_thread  # noqa: E402
 
 
@@ -51,12 +52,25 @@ class ChatWindow(Adw.ApplicationWindow):
         self._banner = Adw.Banner(revealed=False, button_label="Retry")
         self._banner.connect("button-clicked", lambda _b: self._on_submit(self._entry))
 
+        header = Adw.HeaderBar()
+        knows = Gtk.Button(icon_name="view-list-symbolic", tooltip_text="What ZeroOS knows")
+        knows.connect("clicked", lambda _b: recall.build(self).present(self))
+        header.pack_end(knows)
+
         layout = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        layout.append(Adw.HeaderBar())
+        layout.append(header)
         layout.append(self._banner)
         layout.append(scroller)
         layout.append(self._entry)
         self.set_content(layout)
+
+        # Without this the usage line is never written: nothing else in the
+        # app calls close(), and the process just exits.
+        self.connect("close-request", self._on_close)
+
+    def _on_close(self, _window) -> bool:
+        self._session.close()
+        return False
 
     def _append(self, who: str, text: str) -> None:
         label = Gtk.Label(label=text, wrap=True, xalign=0, selectable=True)
