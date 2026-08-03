@@ -98,7 +98,7 @@ def test_a_fact_exactly_at_the_cap_is_stored():
     assert len(memory.load()) == 1
 
 
-def test_the_fifty_first_fact_is_refused_and_invites_a_consolidation():
+def test_the_fact_past_the_cap_is_refused_and_invites_a_consolidation():
     # Amendment 2 overrides the brief's flat refusal: at the cap, remember
     # must invite the model to propose a merge rather than just say no.
     gate = AllowGate()

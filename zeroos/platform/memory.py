@@ -21,8 +21,8 @@ from pathlib import Path
 
 from zeroos.platform import paths
 
-MAX_FACTS = 50
-MAX_CHARS = 200
+MAX_FACTS = 150
+MAX_CHARS = 300
 
 # Control characters that are not whitespace. Tabs and newlines survive this
 # and are collapsed by the split() below; the rest are deleted, because a

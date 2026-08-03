@@ -156,3 +156,13 @@ def test_an_enormous_remember_is_truncated_for_display():
     row = describe.describe_batch([("remember", {"text": "x" * 10_000})])[0]
     assert len(row) < memory.MAX_CHARS + 40
     assert row.endswith('…"')
+
+
+def test_a_remember_row_truncates_at_the_store_cap_not_a_fixed_number():
+    # describe._for_display caps on memory.MAX_CHARS, so raising the store cap
+    # must move the dialog cap with it. If someone later hardcodes a number
+    # here, a fact the user is asked to approve gets cut mid-sentence and the
+    # row stops being the thing they consented to.
+    row = describe.describe_batch([("remember", {"text": "x" * (memory.MAX_CHARS + 50)})])[0]
+    assert "x" * memory.MAX_CHARS in row
+    assert row.endswith('…"')
