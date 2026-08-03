@@ -9,7 +9,9 @@ each.
 > recorded below as **PASS** with citations. Criterion 7 is **PASS** mechanically
 > and its human half remains **PENDING**. Criterion 8 is **PASS** — Task 10 built
 > and ran on runtime 50. Criterion 9 — the one spec §13 calls the real criterion —
-> still waits on a tester.
+> is **IN PROGRESS**: day one is 2026-08-04, day two is 2026-08-06, and the
+> tester is the author, which is a conflict recorded in that section rather than
+> waved past.
 >
 > The §6 attack walk at the foot of this document **has now been run**, against
 > the real model, the real gate and a real GTK dialog. It found one defect, since
@@ -23,7 +25,7 @@ each.
 
 **Suite state at HEAD:** `284 passed, 0 failed`. (Warnings are
 pre-existing PyGObject/asyncio deprecation notices, unrelated to the product.)
-The v0.1 baseline was 170; v0.2 added 112 tests.
+The v0.1 baseline was 170; v0.2 added 114 tests.
 
 **The seam to watch.** v0.1's acceptance pass found a defect no per-task review
 could see, because it lived between two tasks: `session._run` logged a
@@ -271,6 +273,18 @@ you?"* Write the answer down before anything is launched.
 Question 4 is the failing condition. A tester who cannot account for what the
 assistant knows will not trust it with more, and everything past v0.2 is a
 request for more trust.
+
+**IN PROGRESS. Day one is 2026-08-04**, the day v0.2 landed on `main`. The
+tester is the author, which weakens the result and should be said plainly: the
+person who built the recall pane cannot answer question 3 honestly, since being
+pointed at it is not a thing that can be undone. Questions 1, 2 and 4 survive
+the conflict — a prediction written down before launching is either right or
+wrong regardless of who wrote it, and question 4 is about what the store
+actually holds.
+
+**Day two is 2026-08-06.** Write the prediction down *before* opening the app,
+then record all four answers here. Until that entry exists this criterion is
+not met, and v0.2 is machinery that has not been shown to be a feature.
 
 ---
 
