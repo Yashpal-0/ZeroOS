@@ -16,12 +16,17 @@ shippable.
 
 | # | Subsystem | What it is | Status |
 |---|---|---|---|
-| 1 | **Agent runtime** | The loop: text in, plan, tool calls, response. Conversation state, model config, cost control. | v0.1 |
-| 2 | **Surface** | How the user talks to it: window, onboarding, permission dialog, packaging. | v0.1 |
+| 1 | **Agent runtime** | The loop: text in, plan, tool calls, response. Conversation state, model config, cost control. | v0.1, extended v0.2 (approved facts, transcript, usage counts) |
+| 2 | **Surface** | How the user talks to it: window, onboarding, permission dialog, packaging. | v0.1, extended v0.2 (recall pane) |
 | 3 | **Permissions & credentials** | What the agent may do, what it must ask about, where secrets live. | v0.1 (permissions) / later (third-party credentials) |
 | 4 | **Integration layer** | Reach beyond the local machine: third-party services, MCP servers, plugins. | Later |
 | 5 | **Perception** | What it can sense without being told: active window, calendar, notifications, screen text, room audio. Read-only. | Later |
 | 6 | **Autonomy** | Acting without a human present: trust that is earned rather than asked for, unattended work, explaining afterwards. | Later |
+
+Persistence is deliberately **not** a seventh subsystem. What v0.2 added is state
+inside subsystem 1 and a pane inside subsystem 2 — a store with no loop of its own
+and no surface of its own. Listing it separately would suggest it is shippable
+separately, which is the one thing this table exists to say about a subsystem.
 
 Subsystem 3 is split deliberately. Local permissions are v0.1 and load-bearing.
 Third-party *credentials* — OAuth, token refresh, revocation, per-service scopes —
@@ -203,7 +208,7 @@ Not "someday maybe" — each is a real feature with a reason it is not now.
 
 | Feature | Why not yet |
 |---|---|
-| **Multi-agent / subagents** | Solves a problem v0.1 does not have. A single loop over sixteen tools does not need delegation. Distinct from v0.8's unattended work, which is one agent running unwatched, not several coordinating. Revisit only when a real task demonstrably exceeds one context. |
+| **Multi-agent / subagents** | Solves a problem this design does not have. A single loop over eighteen tools does not need delegation. Distinct from v0.8's unattended work, which is one agent running unwatched, not several coordinating. Revisit only when a real task demonstrably exceeds one context. |
 | **Parallel task graph** | v0.1 already executes multiple tool calls per turn. A dependency graph across turns is speculative until a workload demands it. |
 | **Screen and input *control*** | Synthesising keystrokes and clicks is the direct opposite of the curated catalog: unbounded, unauditable, and impossible to preview honestly in an approval dialog — "click at (840, 210)" tells the user nothing. Note this is **not** the same as screen *reading*, which is v0.7 and adds no action surface. Reconsider only if the catalog approach demonstrably hits a ceiling. |
 | **Windows and macOS** | Every catalog function is OS-specific plumbing. Porting means rewriting `platform/`, which is the point of isolating it, but it doubles the surface to test. |
@@ -239,12 +244,22 @@ kills the "unbounded cost" argument this table previously made.
 
 What remains is that a proxy makes the app no longer local-only, which is a design
 change, not a budget one. Absorbed cost is now the *cheapest* option to run and the
-*most expensive* option to build. Decide before v0.2 is planned, not at launch.
+*most expensive* option to build.
 
-Two things this leaves open: abuse control (an absorbed-cost proxy with no auth is a
-free inference endpoint the moment anyone points a script at it), and the fact that the
-cost estimate above assumes turns stay small. Conversation memory in v0.2 grows the
-prompt every turn, and prompt tokens are the side that scales.
+**This was to be decided before v0.2 was planned. It was not, and v0.2 is built.**
+Nothing broke, because bring-your-own-key still holds for a dogfooding build — but
+the deadline has already been missed once and the next one is real: the decision
+gates the first non-developer tester, who is criterion 9, who is the only thing
+standing between here and v0.3.
+
+One thing this leaves open: abuse control. An absorbed-cost proxy with no auth is a
+free inference endpoint the moment anyone points a script at it.
+
+**The prompt-growth worry attached here is resolved.** It assumed conversation memory
+would grow the prompt every turn. It does not — v0.2 sends a capped list of at most
+fifty approved facts as a second system message, and the transcript is never sent at
+all. Growth is bounded by the cap rather than by session length, and `usage.log`
+records the per-session counts to check it against.
 
 **The deeper problem is that the whole estimate assumes a human typing.** A hundred
 turns a day is a rate limit imposed by hands. From v0.6 onward the agent runs without
@@ -258,16 +273,21 @@ against v0.6 before that phase is planned.
 
 - **Cost transparency in the UI.** Deliberately *not* built for v0.1. At $0.00006 a
   turn, a running cost display would show `$0.00` for weeks and teach the user nothing.
-  It becomes necessary if v0.2 memory grows prompts materially, or if a proxy makes
-  someone else's budget the one being spent.
+  One of its two triggers is now settled: v0.2 memory does **not** grow prompts
+  materially — the fact list is capped and the transcript is never sent. The other
+  trigger stands, and is the only one that ever mattered: a proxy would make someone
+  else's budget the one being spent.
 - **Crash and error reporting.** Currently a local log file. Fine for dogfooding,
   insufficient once testers exist and cannot read it.
-- **Form of address is hardcoded.** The v0.1 system prompt addresses the user as "Sir",
-  which is right for a single-developer dogfooding build and wrong the moment anyone
-  else runs it. Make it a preference — with a neutral default — before testers exist.
+- ~~**Form of address is hardcoded.**~~ **Closed in v0.2.** It is a preference now,
+  with a neutral default, changeable from the recall pane. The v0.1 prompt text is
+  still shipped byte-for-byte as the "Sir" variant, because criterion 4 turns on that
+  string not changing.
 - **A written trust story.** "What can this app do to my files?" needs a plain-language
-  answer on the project page, backed by the fact that the catalog is sixteen readable
-  functions.
+  answer on the project page, backed by the fact that the catalog is eighteen readable
+  functions. v0.2 adds a second question to answer plainly — "what does it remember,
+  and how do I make it forget?" — which the recall pane answers in the product but
+  nothing answers on the page.
 
 ---
 
