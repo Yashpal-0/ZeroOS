@@ -60,13 +60,15 @@ def load() -> list[dict]:
 
 
 def add(text: str) -> str:
-    """Store a normalised fact and return its id. The caller checks the caps."""
+    """Store a normalised fact and return its id. The caller checks the caps.
+    Returns empty string if the write fails."""
     fact = {
         "id": secrets.token_hex(4),
         "text": text,
         "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
-    _write(load() + [fact])
+    if not _write(load() + [fact]):
+        return ""
     return fact["id"]
 
 
@@ -75,8 +77,7 @@ def remove(fact_id: str) -> bool:
     kept = [f for f in facts if f["id"] != fact_id]
     if len(kept) == len(facts):
         return False
-    _write(kept)
-    return True
+    return _write(kept)
 
 
 def text_of(fact_id: str) -> str | None:
@@ -86,9 +87,21 @@ def text_of(fact_id: str) -> str | None:
     return None
 
 
-def _write(facts: list[dict]) -> None:
-    target = path()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temp = target.with_name(target.name + ".tmp")
-    temp.write_text("".join(json.dumps(f) + "\n" for f in facts), encoding="utf-8")
-    os.replace(temp, target)
+def _write(facts: list[dict]) -> bool:
+    """Write facts to disk atomically. Returns True on success, False on any
+    OSError (permission denied, disk full, cross-device link, etc). Cleans up
+    temp files on failure."""
+    try:
+        target = path()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temp = target.with_name(target.name + ".tmp")
+        temp.write_text("".join(json.dumps(f) + "\n" for f in facts), encoding="utf-8")
+        os.replace(temp, target)
+        return True
+    except OSError:
+        # Best-effort cleanup of temp file if it exists
+        try:
+            temp.unlink()
+        except (OSError, NameError):
+            pass
+        return False

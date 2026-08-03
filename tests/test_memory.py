@@ -105,3 +105,54 @@ def test_writes_leave_no_temp_file_behind():
 
 def test_the_store_lives_under_the_data_dir(data_home):
     assert str(memory.path()).startswith(str(data_home))
+
+
+def test_add_returns_empty_string_on_write_failure(tmp_path, monkeypatch):
+    """When write fails, add returns "" instead of raising."""
+    data_home = tmp_path / "data"
+    monkeypatch.setenv("XDG_DATA_HOME", str(data_home))
+    # Create parent so data_home's parent exists, but make data_home a file
+    data_home.parent.mkdir(parents=True, exist_ok=True)
+    data_home.write_text("not a directory")
+    # Now mkdir will fail because data_home is a file
+    result = memory.add("should fail")
+    assert result == ""
+
+
+def test_remove_returns_false_on_write_failure(tmp_path, monkeypatch):
+    """When write fails, remove returns False instead of raising."""
+    data_home = tmp_path / "data"
+    monkeypatch.setenv("XDG_DATA_HOME", str(data_home))
+    # First add succeeds
+    data_home.mkdir(parents=True, exist_ok=True)
+    fact_id = memory.add("something")
+    assert fact_id != ""
+    # Make directory unwritable
+    import stat
+    data_home.chmod(0o444)  # read-only
+    try:
+        # remove should return False, not raise
+        result = memory.remove(fact_id)
+        assert result is False
+    finally:
+        data_home.chmod(0o755)  # restore for cleanup
+
+
+def test_temp_file_cleaned_up_on_write_failure(tmp_path, monkeypatch):
+    """When write fails partway, temp file is cleaned up."""
+    data_home = tmp_path / "data"
+    monkeypatch.setenv("XDG_DATA_HOME", str(data_home))
+    data_home.mkdir(parents=True, exist_ok=True)
+    memory.add("first")
+    # Make directory unwritable to cause write to fail
+    import stat
+    data_home.chmod(0o444)  # read-only
+    try:
+        # add should return "" and not leave a temp file
+        result = memory.add("second")
+        assert result == ""
+        # Verify no .tmp files left behind by listing dir with write re-enabled
+    finally:
+        data_home.chmod(0o755)  # restore for cleanup
+        temp_files = [p for p in data_home.iterdir() if p.name.endswith(".tmp")]
+        assert len(temp_files) == 0, f"Temp files left behind: {temp_files}"
