@@ -28,8 +28,8 @@ pass of section 4 — and section 8 states what that costs.
 
 - **No consolidation machinery.** At the cap, the model proposes merges and the
   user approves them, exactly as v0.2 decided. Nothing automatic.
-- **No persistence for anything in flight.** Candidates live in local variables
-  for the length of one turn. There is no queue, no spool file, no recovery.
+- **No persistence for anything in flight.** Candidates live on the `Session`
+  in memory, for at most one turn. There is no spool file and no recovery.
 - **No raw transcript reaching the model.** This is the same line v0.2 drew and
   section 4 explains why v0.3's noticing pass makes it sharper, not softer.
 - **No change to `_TEXT` in `prompt.py`.** See section 3.
@@ -48,29 +48,30 @@ Section 5 explains why it is not exempted.
 One new module. Everything else is an edit to something that exists.
 
 ```
-agent loop (existing)
-    │
-    │ turn completes, history.append has run
-    ▼
-notice.candidates()            zeroos/agent/notice.py   NEW
-    one model call
-    sees:   user messages, assistant prose
-    never:  tool results, tool_calls
-    │
-    │ up to 2 candidate strings
-    ▼
-gate.prepare()                 existing
-    rows for candidates, defaulted UNTICKED
-    │
-    ▼
-dialog                         existing
-    │ approved rows only
-    ▼
-session._run("remember", …)    existing
-    logged and counted like any other call
-    │
-    ▼
-memory store                   existing, caps raised
+turn N   send() ── step loop ── reply returned ── window renders it
+                                     │
+                                     ▼
+                        notice.candidates()      zeroos/agent/notice.py  NEW
+                            one model call
+                            sees:   user messages, assistant prose
+                            never:  tool results, tool_calls
+                            │
+                            │ up to 2 candidate strings, held on the Session
+                            ▼
+turn N+1 send() ── candidates surface first ──────┐
+                                                  ▼
+                                    gate.prepare()          existing
+                                        rows defaulted UNTICKED
+                                                  ▼
+                                    dialog                  existing
+                                                  │ approved rows only
+                                                  ▼
+                                    session._run("remember") existing
+                                        logged and counted as usual
+                                                  ▼
+                                    memory store            existing, caps raised
+                                                  │
+                          ── then turn N+1's own step loop runs ──
 ```
 
 Files touched:
@@ -176,22 +177,44 @@ and that is the correct behaviour: silence.
 
 ### Where it runs
 
-End of `send()`, after `history.append`:
+The pass runs at the end of `send()`, but its candidates are **surfaced at the
+start of the next `send()`**:
 
 ```python
-found = notice.candidates(self._client, self._messages)
-if found:
+def send(self, text: str) -> str:
+    self._offer_candidates()          # last turn's, if any
+    ...                               # existing body, unchanged
+    history.append(text, reply)
+    self._pending = notice.candidates(self._client, self._messages)
+    return reply
+
+def _offer_candidates(self) -> None:
+    found, self._pending = self._pending, []
+    if not found:
+        return
     self._gate.prepare([("remember", {"text": c}) for c in found])
     for c in found:
         self._run("remember", {"text": c})
 ```
 
-**Why here and not in the step loop.** `gate.prepare()` opens with
-`self._ledger.clear()`, and it runs only when the model made tool calls — which
-most turns it does not. Candidates carried across turns would sit unsurfaced
-indefinitely, or would be wiped by the next `prepare()`. Running the pass after
-the loop has finished means its `prepare()` has nothing left to destroy, and
-there is no cross-turn state to design, persist, or recover.
+**Why the dialog cannot appear inside the turn that produced the candidates.**
+`ask_on_main_thread` blocks until the user answers, and `window.py` renders the
+reply only after `send()` returns. A dialog raised before that return would ask
+the user to approve facts drawn from a reply they have not been shown yet, while
+the window still reads as busy. Deferring by one turn means the reply lands
+first and the user has read it before being asked about it.
+
+**Why not simply merge candidates into the turn's own `prepare()`.**
+`gate.prepare()` opens with `self._ledger.clear()`, and it runs only when the
+model made tool calls — which most turns it does not. Candidates folded into it
+would go unsurfaced on every turn without tool calls. `_offer_candidates` runs
+before the step loop begins, so the loop's own `prepare()` clears a ledger whose
+entries have already been consumed.
+
+**The cost of deferring.** Candidates from a session's final turn are never
+offered. They are dropped, not saved. Section 7's closing pass covers the end of
+a session, and adding persistence to rescue them would buy back exactly the
+spool file this design does not want.
 
 **Why `_run` and not `store.add`.** `_run` already resolves the tier, records to
 `actions.log`, and increments the counters. An approved candidate is an ordinary
@@ -302,6 +325,22 @@ not re-implemented.
 The summary's rows are ordinary `remember` rows: same dialog, same unticked
 default, same store, same log. There is no privileged class of fact.
 
+### `close()` ordering, and what it still promises
+
+`Session.close()` today is one line — `usage.record(...)` — and its docstring
+says it never raises, because `usage.record` swallows its own failures. v0.3
+adds a model call and a dialog ahead of that line, so both claims need restating.
+
+**Order.** The summary turn runs first, its approved remembers go through
+`_run` and increment `_actions`, and `usage.record` runs last. Reversed, the
+usage line would undercount the session it is summarising.
+
+**The guard.** The summary turn carries the same bare `except Exception` as
+`notice.candidates`. A network failure on the way out must not take shutdown
+down with it, and there is nothing a user can do about a failed summary at the
+moment the window is already gone. `close()` keeps its never-raises contract;
+the docstring gains the second reason.
+
 ### Lifecycle, stated so it is not discovered at implementation time
 
 - **App killed** — nothing stored. There is no state file and nothing to recover.
@@ -367,7 +406,13 @@ In order of how much rests on them.
    the action row ticked.
 6. **Criterion 4 still holds.** No facts → exactly one system message, and
    `SYSTEM_PROMPT` bytes unchanged by the `MEMORY_PREFACE` edit.
-7. **A full merge cycle at the 150 cap**, end to end.
+7. **The reply is never withheld.** A turn that produces candidates returns its
+   reply without `ask` having been called; the candidates surface on the
+   following `send()`. An `ask` that raises if called would fail this.
+8. **A full merge cycle at the 150 cap**, end to end.
+9. **`close()` ordering.** A summary remember approved on the way out is counted
+   in that session's usage line, and a summary turn that throws still leaves
+   `close()` returning normally.
 
 Plus the mechanical sweep: every test faking `ask` moves to
 `list[tuple[str, bool]]`.
