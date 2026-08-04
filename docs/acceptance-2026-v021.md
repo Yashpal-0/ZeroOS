@@ -189,6 +189,49 @@ estimate, along with the argument built on it in the billing gate, predates
 every one of these changes. Recorded here rather than in the roadmap because
 it was measured here.
 
+### The reply was split in two — USER RULING, 2026-08-04
+
+The instruction was that what JARVIS *says* is always short, and what is not
+necessary is *shown* rather than said. There is no voice channel — speech is
+v0.5 on the roadmap — so "say" means the prose reply and "show" needed a
+channel that did not exist.
+
+Both halves were built, because either one alone fails. The prompt now asks
+for one sentence and puts everything past it below a line holding nothing but
+three hyphens; `window.split()` cuts the reply there and renders the remainder
+inside a collapsed `Gtk.Expander`. A prompt rule with no renderer would print
+the marker as prose; a renderer with no rule would never see one.
+
+The prompt is guidance and guidance is not a guarantee, so a length guard sits
+behind it: past `window.SPOKEN_MAX` (200 characters) the overflow is moved
+down to the shown half. It cuts only at a sentence boundary and does nothing
+at all if there is no `". "` within reach, on the grounds that one long
+sentence said whole reads better than one cut mid-thought. 200 is a constant
+and deliberately not a setting — a number the user can raise is a number that
+gets raised until the split stops meaning anything.
+
+Three consequences worth having in writing:
+
+- **The fixed block changed again.** The brevity paragraph it replaced was
+  v0.1 text, so criterion 4's retired parity clause is retired a second time
+  over. `tests/test_prompt.py`'s pin was updated rather than deleted, for the
+  reason already stated there: its job was to catch drift nobody decided on.
+- **The split is presentation only.** `session.py` puts the whole reply,
+  marker and all, into `self._messages` and into `history.append`, so the
+  model still sees what it said. What the recall pane shows is the whole reply
+  with the marker line taken out — the pane is the archive, and the marker is
+  a rendering instruction, not prose.
+- **The two halves live in different files and nothing else couples them.**
+  `tests/test_window.py::test_the_prompt_asks_for_the_marker_the_window_splits_on`
+  asserts the prompt's worked example still contains a marker `window.MARKER`
+  recognises. The example is indented, so the regex tolerates indentation:
+  matching only a flush-left marker would have lost the split on exactly the
+  replies that followed the instructions most literally.
+
+Not measured: whether the model actually obeys the format in live use. The
+guard covers the turns where it does not, but how often that is remains a
+question for the next walk.
+
 ---
 
 ## Criterion 1 — Acts on a stored fact instead of asking again

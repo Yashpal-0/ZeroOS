@@ -99,7 +99,14 @@ def _history_group(dialog) -> Adw.PreferencesGroup:
         group.add(Adw.ActionRow(title="Nothing here yet."))
         return group
     for turn in reversed(turns):
-        row = Adw.ActionRow(title=turn["you"], subtitle=turn["zeroos"], use_markup=False)
+        # Imported here, not at module scope: window.py imports this module, so
+        # a top-level import would close the cycle. The whole reply is kept --
+        # this pane is the archive, and nothing in it is too long to look at --
+        # but the marker itself is window.py's format, not something to read.
+        from zeroos.surface.window import MARKER
+
+        row = Adw.ActionRow(title=turn["you"], use_markup=False,
+                            subtitle=MARKER.sub("\n", turn["zeroos"]).strip())
         row.set_property("title-lines", 0)
         row.set_property("subtitle-lines", 0)
         group.add(row)

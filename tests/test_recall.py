@@ -59,6 +59,19 @@ def row_titled(dialog, title):
     return next(r for r in widgets(dialog, Adw.ActionRow) if r.get_title() == title)
 
 
+def test_a_past_reply_is_shown_without_the_split_marker():
+    # window.py's marker is a rendering instruction, not prose. Left in, every
+    # past reply in the archive carries a stray "---" through the middle of it.
+    history.append("file my tax pdfs", "Four are filed, Sir.\n---\n2024-return.pdf")
+    dialog = recall.build(None)
+    shown(dialog)  # realises the tree; see its docstring
+    text = row_titled(dialog, "file my tax pdfs").get_subtitle()
+
+    assert "---" not in text, "the marker must not survive into the pane"
+    assert "Four are filed, Sir." in text
+    assert "2024-return.pdf" in text, "the pane is the archive -- it keeps the detail"
+
+
 def trash_button_for(dialog, title):
     """The trash button belonging to one named fact row.
 
