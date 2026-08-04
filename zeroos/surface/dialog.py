@@ -40,10 +40,16 @@ def ask_on_main_thread(window, rows: list[tuple[str, bool]]) -> list[bool]:
             check = Gtk.CheckButton(label=row, active=ticked)
             check.set_property("margin-start", 6)
             # A CheckButton's label does not wrap by default. describe_batch
-            # caps a remember row at about 313 characters, which still runs far
-            # wider than the dialog can ever be on one line, so what the user
-            # sees is a sentence running off the edge. A row you cannot read is
-            # not consent.
+            # caps a remember row at memory.MAX_CHARS plus the surrounding
+            # copy, which still runs far wider than the dialog can ever be on
+            # one line, so what the user sees is a sentence running off the
+            # edge. A row you cannot read is not consent.
+            #
+            # Measured at the 2026-08-04 caps: a 1,012-character row is 1,144 px
+            # tall in a 360 px-wide dialog, and AdwAlertDialog gives the extra
+            # child a 304 px scrolled viewport. Nothing is truncated — every
+            # character is reachable — but with two rows the second checkbox
+            # starts below the fold, so the user scrolls to learn it is there.
             check.get_last_child().set_wrap(True)
             check.get_last_child().set_xalign(0)
             checks.append(check)
