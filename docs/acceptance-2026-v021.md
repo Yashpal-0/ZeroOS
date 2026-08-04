@@ -169,14 +169,25 @@ decision rather than solved by reflex.
 
 ### One finding, from criterion 6's measurement
 
-At the cap the injected memory block is **47,107 characters — about 11,800
-tokens on every turn**. v0.2's ceiling was 50 × 200 = 10,000 characters, so
-the per-turn memory payload grew roughly **4.7×**, and v0.2.1 additionally
-sends a second model call per turn for the noticing pass. Nothing breaks —
-this is the cap working as specified — but the roadmap's per-turn cost
-estimate, and the argument built on it in the billing gate, predate both
-changes and no longer describe what ships. Recorded here rather than in the
-roadmap because it was measured here.
+At the 150 × 300 cap the injected memory block is **47,107 characters —
+11,918 tokens on every turn**, that second figure taken from the model's own
+`usage.prompt_tokens` rather than estimated. v0.2's ceiling was 50 × 200 =
+10,000 characters, so the per-turn memory payload grew roughly **4.7×**, and
+v0.2.1 additionally sends a second model call per turn for the noticing pass.
+
+**Then the caps themselves were raised.** USER RULING, 2026-08-04: the store's
+ceiling is a 250,000-token share of the context window, which set `MAX_FACTS`
+to 950 and `MAX_CHARS` to 1000. Measured the same way, a full store at the new
+caps is **961,707 characters — 220,354 prompt tokens**, roughly **18.5×** the
+figure above and **96×** v0.2's. `MAX_CANDIDATES` stayed at 2 by the same
+ruling: it is flood control for the consent dialog, not a size limit.
+
+Nothing breaks — this is the cap working as specified, and a store holding
+nine facts still sends nine. But a full store is now a fifth of the context
+window before the conversation starts, and the roadmap's per-turn cost
+estimate, along with the argument built on it in the billing gate, predates
+every one of these changes. Recorded here rather than in the roadmap because
+it was measured here.
 
 ---
 
@@ -385,8 +396,18 @@ can forge.
 
 ## Criterion 6 — 150 × 300 stored, listed, and sent without the pane breaking
 
+**CONFIRMED, 2026-08-04, against the caps as they stood that day** — and
+those caps were raised hours later by the 250,000-token ruling, to 950 × 1000.
+Everything below is a real run and stays as written; what no longer holds is
+the phrase "the true worst case". A store 6.3× longer has not been built,
+listed, or rendered, and the pane finding below — roughly 15,000 px of
+scrolling with no search — scales with it to something near 95,000 px.
+
+**Re-running this criterion at 950 × 1000 is outstanding work**, and the pane
+half of it is the part likely to find something.
+
 **CONFIRMED, 2026-08-04.** The store, the outgoing request, and the pane were
-all measured at the true worst case. The pane was built, counted, deleted
+all measured at the caps then in force. The pane was built, counted, deleted
 from, and rendered to an image and looked at.
 
 **Stored.** 150 facts written through `memory.add()` itself rather than

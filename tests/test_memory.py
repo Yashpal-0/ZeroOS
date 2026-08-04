@@ -2,6 +2,7 @@
 
 import pytest
 
+from zeroos.agent import prompt
 from zeroos.platform import memory
 
 
@@ -158,8 +159,20 @@ def test_temp_file_cleaned_up_on_write_failure(tmp_path, monkeypatch):
         assert len(temp_files) == 0, f"Temp files left behind: {temp_files}"
 
 
-def test_the_caps_are_the_v021_values():
-    # Spec section 6. These are load-bearing numbers, not incidental ones:
-    # 150 x 300 is the ceiling the prompt-growth argument was made against.
-    assert memory.MAX_FACTS == 150
-    assert memory.MAX_CHARS == 300
+def test_the_caps_stay_inside_the_context_budget():
+    # Spec section 6. These are load-bearing numbers, not incidental ones.
+    # Through v0.2.1 they were 150 x 300, chosen for comfort. USER RULING,
+    # 2026-08-04: the ceiling is a 250,000-token share of the context window,
+    # so the pin is on the budget rather than on the pair of literals -- the
+    # values may move, but not past the number that made them safe.
+    #
+    # 3.95 chars/token is the measured worst case for varied English prose in
+    # this store, taken from the real model's own prompt_tokens (the probe's
+    # repeated text reported 4.36, which flatters the caps; the denser figure
+    # is the one to size against).
+    assert memory.MAX_FACTS == 950
+    assert memory.MAX_CHARS == 1000
+
+    overhead = len("[0123abcd] ") + len("\n")
+    chars = len(prompt.MEMORY_PREFACE) + memory.MAX_FACTS * (memory.MAX_CHARS + overhead)
+    assert chars / 3.95 < 250_000, "the full store no longer fits the token budget"
