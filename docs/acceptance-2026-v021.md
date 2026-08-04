@@ -6,26 +6,66 @@ the evidence for each, following the shape of
 §11 — it covers a behaviour decided after the spec was written, and is
 recorded here so it gets judged rather than assumed.
 
-> **Status: NOT STARTED.** Every criterion below is unconfirmed. Criteria 3,
-> 4, 5, and 7 have tests that pin them, and those tests pass at HEAD today —
-> but a test passing in the suite is not the same thing as someone having
-> run the acceptance walk and recorded that it does, and that distinction is
-> the reason this document exists rather than a green test run standing in
-> for it. Criteria 1, 2, and 6 have no test at all; they can only be settled
-> by using the app, and none of that use has happened yet.
+> **Status: PARTIAL, 2026-08-04.** The mechanical half of the walk has been
+> run and recorded below. Criteria 3, 4, 5, and 7 are CONFIRMED — each cited
+> test was run individually rather than inferred from a green suite, and
+> criterion 3's test was additionally shown able to *fail*, because a
+> security test that cannot fail is not evidence. Criterion 6 is
+> HALF-CONFIRMED: the store and the outgoing request handle 150 × 300, and
+> the fixture for the remaining half is built and waiting. Criteria 1, 2,
+> and 8 are untouched — they need a person using the app, and the person
+> who ran this half is not that person.
 
-**Suite state at HEAD:** `312 passed, 0 failed`. The v0.2 baseline was 284;
-v0.2.1 added 28 tests.
+**Who ran it.** The assistant, at the user's instruction, on 2026-08-04. It
+can run tests, mutate source, and measure payloads. It cannot look at a
+window or judge whether being proposed a fact feels like attention. Every
+criterion below that turns on either is left open on purpose rather than
+argued into a verdict.
+
+**Suite state at HEAD:** `316 passed, 0 failed` with `tests/test_app.py`
+excluded — that module segfaults while a ZeroOS instance is running, because
+its `register()` returns a *remote* GApplication and `do_activate()` on a
+remote instance crashes inside GTK. Environmental, unrelated to this release,
+and it passes with the app closed (317 total). The v0.2 baseline was 284.
 
 | # | Criterion | Status | Evidence |
 |---|---|---|---|
 | 1 | Acts on a stored fact instead of asking again | NOT STARTED | hands-on |
 | 2 | Proposes an unasked fact in ordinary use | NOT STARTED | hands-on — the release's real criterion |
-| 3 | No tool-result text in any noticing payload | NOT STARTED | `tests/test_notice.py::test_tool_results_never_reach_the_noticing_request` |
-| 4 | Fresh install's first request byte-identical to v0.1's | NOT STARTED | `tests/test_session.py::test_with_no_memories_there_is_exactly_one_system_message` |
-| 5 | Every memory row starts unticked | NOT STARTED | `tests/test_gate.py::test_a_remember_row_is_offered_unticked`, `tests/test_dialog.py::test_a_row_offered_unticked_starts_unticked` |
-| 6 | 150 × 300 stored, listed, and sent without the pane breaking | NOT STARTED | hands-on — the recall pane is the part at risk |
-| 7 | Close never delayed by the summary dialog | NOT STARTED | `tests/test_window.py::test_close_request_halts_the_close_until_the_summary_finishes` |
+| 3 | No tool-result text in any noticing payload | **CONFIRMED** | `tests/test_notice.py::test_tool_results_never_reach_the_noticing_request`, run alone and mutation-checked |
+| 4 | Fresh install's first request byte-identical to v0.1's | **CONFIRMED** | `tests/test_session.py::test_with_no_memories_there_is_exactly_one_system_message` |
+| 5 | Every memory row starts unticked | **CONFIRMED** | `tests/test_gate.py::test_a_remember_row_is_offered_unticked`, `tests/test_dialog.py::test_a_row_offered_unticked_starts_unticked` |
+| 6 | 150 × 300 stored, listed, and sent without the pane breaking | **HALF** | store and request measured at the cap; pane unopened |
+| 7 | Close never delayed by the summary dialog | **CONFIRMED** | `tests/test_window.py::test_close_request_halts_the_close_until_the_summary_finishes` |
+| 8 | A declined proposal is not raised again this session | NOT STARTED | hands-on |
+
+### The run
+
+```
+$ /usr/bin/python3 -m pytest -v \
+    tests/test_notice.py::test_tool_results_never_reach_the_noticing_request \
+    tests/test_session.py::test_with_no_memories_there_is_exactly_one_system_message \
+    tests/test_gate.py::test_a_remember_row_is_offered_unticked \
+    tests/test_dialog.py::test_a_row_offered_unticked_starts_unticked \
+    tests/test_window.py::test_close_request_halts_the_close_until_the_summary_finishes
+tests/test_notice.py::test_tool_results_never_reach_the_noticing_request PASSED
+tests/test_session.py::test_with_no_memories_there_is_exactly_one_system_message PASSED
+tests/test_gate.py::test_a_remember_row_is_offered_unticked PASSED
+tests/test_dialog.py::test_a_row_offered_unticked_starts_unticked PASSED
+tests/test_window.py::test_close_request_halts_the_close_until_the_summary_finishes PASSED
+5 passed, 4 warnings in 2.24s
+```
+
+### One finding, from criterion 6's measurement
+
+At the cap the injected memory block is **47,107 characters — about 11,800
+tokens on every turn**. v0.2's ceiling was 50 × 200 = 10,000 characters, so
+the per-turn memory payload grew roughly **4.7×**, and v0.2.1 additionally
+sends a second model call per turn for the noticing pass. Nothing breaks —
+this is the cap working as specified — but the roadmap's per-turn cost
+estimate, and the argument built on it in the billing gate, predate both
+changes and no longer describe what ships. Recorded here rather than in the
+roadmap because it was measured here.
 
 ---
 
@@ -99,7 +139,32 @@ presented as a blind trial.
 
 ## Criterion 3 — No tool-result text in any noticing payload
 
-**NOT STARTED.** Evidence:
+**CONFIRMED, 2026-08-04.** Run alone, and — because this is the criterion
+everything else in the release rests on — shown able to fail. `_readable` in
+`zeroos/agent/notice.py` was replaced with `return list(messages)`, a
+pass-through filter, and the test failed:
+
+```
+$ # with _readable replaced by a pass-through
+$ /usr/bin/python3 -m pytest -q \
+    tests/test_notice.py::test_tool_results_never_reach_the_noticing_request
+FAILED tests/test_notice.py::test_tool_results_never_reach_the_noticing_request
+1 failed, 1 warning in 0.39s
+```
+
+Source restored from a backup and `git diff` confirmed clean afterwards. A
+passing security test proves nothing on its own; this one detects the exact
+regression it is named for.
+
+**What this does not cover.** It proves the filter drops `role == "tool"`
+messages from the payload `notice.candidates` builds. It does not prove no
+future producer puts file text into an `assistant` message's `content`,
+where the filter would pass it through by design. That hazard was traced to
+be unreachable at the time of writing — the three `_messages` producers all
+emit either prose or tool results — and it is unreachable by argument, not
+by test.
+
+Evidence:
 `tests/test_notice.py::test_tool_results_never_reach_the_noticing_request`,
 which builds a transcript whose tool result carries a marker string and
 asserts the marker appears nowhere in the request `notice.candidates`
@@ -108,7 +173,7 @@ sends. Spec §4 calls this filter the security boundary of the release; spec
 
 ## Criterion 4 — Fresh install's first request byte-identical to v0.1's
 
-**NOT STARTED.** Evidence:
+**CONFIRMED, 2026-08-04.** Run alone; passed. Evidence:
 `tests/test_session.py::test_with_no_memories_there_is_exactly_one_system_message`,
 which asserts a fresh session's outgoing request carries exactly one system
 message and that its content is `SYSTEM_PROMPT` unchanged. The
@@ -118,7 +183,7 @@ cannot move these bytes regardless of what it says.
 
 ## Criterion 5 — Every memory row starts unticked
 
-**NOT STARTED.** Evidence:
+**CONFIRMED, 2026-08-04.** Both tests run alone; both passed. Evidence:
 `tests/test_gate.py::test_a_remember_row_is_offered_unticked` (the gate
 supplies `False` as the default tick state for a `remember` row and `True`
 for everything else) and
@@ -131,7 +196,56 @@ can forge.
 
 ## Criterion 6 — 150 × 300 stored, listed, and sent without the pane breaking
 
-**NOT STARTED.**
+**HALF-CONFIRMED, 2026-08-04.** The store and the outgoing request were
+measured at the true worst case. The pane has not been opened.
+
+**Stored.** 150 facts written through `memory.add()` itself rather than
+hand-written JSON, so the record shape is correct by construction. Every
+fact is *exactly* 300 characters — the ceiling, not near it:
+
+```
+facts=150 min_len=300 max_len=300 cap=300
+```
+
+**Sent.** `Session._memory_messages()` against that store returns exactly one
+message, as specified, and it is large:
+
+```
+system messages from memory: 1
+injected block chars: 47,107
+rough tokens (chars/4): 11,776
+lines: 152
+```
+
+Nothing fails. The cap does what it says and growth is bounded. But 47 KB on
+every turn is the number this criterion existed to discover, and it is worth
+carrying to the roadmap's billing gate rather than leaving here — see the
+finding at the top of this document.
+
+**The remaining half, with the fixture already built.** A populated home is
+waiting; launching against it needs no setup:
+
+```bash
+env -u XDG_DATA_HOME \
+    ZEROOS_HOME=/tmp/claude-1000/-run-media-yash-External-Zerostic-ZeroOS/17fab52a-f514-4e27-9b63-d1755551c52d/scratchpad/c6-home \
+    /usr/bin/python3 -m zeroos
+```
+
+`ZEROOS_HOME` is the override `paths.home()` already provides for exactly
+this; `XDG_DATA_HOME` must be unset alongside it or `data_dir()` wins and the
+real store is used instead. The real memory store is untouched by this
+walk. Note the fixture is in a scratch directory and will not survive a
+reboot — rebuild it with the same script if it is gone.
+
+**What is still to judge, and only by looking:** whether 150 rows are all
+present, whether the pane stays scrollable and legible rather than merely
+mapped, and whether deleting a row still works at that count. v0.2's
+acceptance pass found a legibility defect at a much smaller size that no
+string-level test could see, which is the whole reason this criterion is
+hands-on.
+
+### Original notes
+
 `tests/test_catalog_memory.py::test_a_merge_at_the_cap_frees_room_for_the_merged_fact`
 and the session tests covering `_memory_messages()` confirm the store and
 the outgoing request handle the cap mechanically. Neither touches the
@@ -158,7 +272,7 @@ acceptance pass drew and could not close for lack of a screenshot.
 
 ## Criterion 7 — Close never delayed by the summary dialog
 
-**NOT STARTED.** Evidence:
+**CONFIRMED, 2026-08-04.** Run alone; passed. Evidence:
 `tests/test_window.py::test_close_request_halts_the_close_until_the_summary_finishes`,
 which drives `ChatWindow._on_close` directly: the first call halts the
 close and moves the session's `close()` to a worker thread rather than
