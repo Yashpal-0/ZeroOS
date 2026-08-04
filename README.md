@@ -56,7 +56,7 @@ filenames.
 - [v0.2 acceptance pass](docs/acceptance-2026-v02.md) — the evidence for each criterion, including what could not be shown
 - [Roadmap](docs/roadmap.md) — subsystem decomposition, build order, deferred features, pre-launch gates
 
-## v0.3 at a glance
+## v0.2.1 at a glance
 
 | | |
 |---|---|

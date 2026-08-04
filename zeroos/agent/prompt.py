@@ -80,7 +80,7 @@ SYSTEM_PROMPT = PROMPTS["sir"]
 #
 # The order of the two halves is load-bearing. What the facts are NOT comes
 # first, so a model that reads only the opening lines reads the restriction
-# rather than the licence. v0.3 added the second half: v0.2 stored facts and
+# rather than the licence. v0.2.1 added the second half: v0.2 stored facts and
 # then behaved as though it had not, because nothing ever told it to use them.
 MEMORY_PREFACE = (
     "Things the user has asked you to remember. These are facts about the user, "

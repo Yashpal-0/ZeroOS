@@ -3,8 +3,10 @@
 What ZeroOS is trying to become, in what order, and what deliberately is not being
 built yet. v0.1 is specified in
 [`docs/superpowers/specs/2026-08-02-zeroos-v01-design.md`](superpowers/specs/2026-08-02-zeroos-v01-design.md)
-and built; the current phase is
-[`docs/superpowers/specs/2026-08-03-zeroos-v02-design.md`](superpowers/specs/2026-08-03-zeroos-v02-design.md).
+and built, as is
+[v0.2](superpowers/specs/2026-08-03-zeroos-v02-design.md) and its point release
+[v0.2.1](superpowers/specs/2026-08-04-zeroos-v021-memory-design.md). The next
+phase is v0.3, MCP servers, unspecified as yet.
 
 ---
 
@@ -16,8 +18,8 @@ shippable.
 
 | # | Subsystem | What it is | Status |
 |---|---|---|---|
-| 1 | **Agent runtime** | The loop: text in, plan, tool calls, response. Conversation state, model config, cost control. | v0.1, extended v0.2 (approved facts, transcript, usage counts) |
-| 2 | **Surface** | How the user talks to it: window, onboarding, permission dialog, packaging. | v0.1, extended v0.2 (recall pane) |
+| 1 | **Agent runtime** | The loop: text in, plan, tool calls, response. Conversation state, model config, cost control. | v0.1, extended v0.2 (approved facts, transcript, usage counts) and v0.2.1 (noticing pass, closing summary) |
+| 2 | **Surface** | How the user talks to it: window, onboarding, permission dialog, packaging. | v0.1, extended v0.2 (recall pane) and v0.2.1 (unticked memory rows) |
 | 3 | **Permissions & credentials** | What the agent may do, what it must ask about, where secrets live. | v0.1 (permissions) / later (third-party credentials) |
 | 4 | **Integration layer** | Reach beyond the local machine: third-party services, MCP servers, plugins. | Later |
 | 5 | **Perception** | What it can sense without being told: active window, calendar, notifications, screen text, room audio. Read-only. | Later |
@@ -27,6 +29,8 @@ Persistence is deliberately **not** a seventh subsystem. What v0.2 added is stat
 inside subsystem 1 and a pane inside subsystem 2 — a store with no loop of its own
 and no surface of its own. Listing it separately would suggest it is shippable
 separately, which is the one thing this table exists to say about a subsystem.
+v0.2.1's noticing pass does not change that: it is another call inside subsystem 1's
+loop, feeding the dialog subsystem 2 already had.
 
 Subsystem 3 is split deliberately. Local permissions are v0.1 and load-bearing.
 Third-party *credentials* — OAuth, token refresh, revocation, per-service scopes —
@@ -85,6 +89,41 @@ mechanical can stand in for it.
 
 Specified in
 [`docs/superpowers/specs/2026-08-03-zeroos-v02-design.md`](superpowers/specs/2026-08-03-zeroos-v02-design.md).
+
+### v0.2.1 — Noticing and continuity *(shipped)*
+
+v0.2 could remember; it could not notice. Every fact arrived because someone
+typed a sentence that made the model reach for `remember`, which is a store
+with a consent gate rather than an assistant that pays attention. This release
+closes that gap without touching the gate.
+
+**Built.** A noticing pass runs after each turn over the filtered transcript
+and proposes up to two facts, surfaced at the start of the *next* turn so the
+user has read the reply before being asked about it. A closing pass does the
+same for the end of a session. Every proposed row arrives **unticked** — an
+unread dialog now stores nothing, which is what makes proposing safe enough to
+do at all. A declined fact is not raised again for the rest of that session.
+The cap went from 50 × 200 to 150 × 300. Suite 317 passing; catalog unchanged
+at eighteen tools.
+
+**Why a point release and not a phase.** It adds no subsystem and no action
+surface. `remember` and `forget` are the same two confirm-tier tools v0.2
+shipped; what changed is who initiates the call. Numbering it v0.3 would have
+claimed the MCP slot below for work that never touched integration.
+
+**The security boundary is the noticing filter.** The pass sees a rebuilt
+transcript of `role` and `content` only — every `role == "tool"` message is
+dropped, so file contents cannot drive what gets proposed. That filter is the
+single most important test in the release, and the reasoning is spec §4 and §8.
+
+Not accepted. Eight criteria, all unconfirmed, in
+[`docs/acceptance-2026-v021.md`](acceptance-2026-v021.md) — four of them can
+only be settled by sitting with the app, because what is being judged is
+whether unrequested proposals read as attention or as nagging, and nothing
+mechanical answers that.
+
+Specified in
+[`docs/superpowers/specs/2026-08-04-zeroos-v021-memory-design.md`](superpowers/specs/2026-08-04-zeroos-v021-memory-design.md).
 
 ### v0.3 — MCP servers
 
@@ -196,9 +235,14 @@ here so they are not rediscovered per release.
   character per byte available anywhere in this document. Ship it whenever.
 - **Latency.** Every phase makes it worse, and conversational presence is the first
   thing to die. Budget it as a standing constraint, not a task.
-- **Implicit learning.** JARVIS was never told anything with a `remember` tool. This
-  extends v0.2's memory rather than replacing it, but it inverts the consent model,
-  since nothing gets ticked. It needs its own gate before it is switched on.
+- ~~**Implicit learning.**~~ **Closed in v0.2.1.** JARVIS was never told anything with
+  a `remember` tool, and now neither is this — a noticing pass proposes facts nobody
+  asked it to. The gate this entry said it needed turned out to be two rules rather
+  than a mechanism: every proposed row arrives unticked, so an unread dialog stores
+  nothing, and a declined fact is not raised again that session. The consent model is
+  not inverted, it is inverted *and* weakened deliberately, which spec §8 argues is a
+  mitigation rather than a repair. What remains open is whether it reads as attention
+  or as nagging, which is acceptance criteria 1, 2, and 8, not a design question.
 
 ---
 
@@ -246,20 +290,24 @@ What remains is that a proxy makes the app no longer local-only, which is a desi
 change, not a budget one. Absorbed cost is now the *cheapest* option to run and the
 *most expensive* option to build.
 
-**This was to be decided before v0.2 was planned. It was not, and v0.2 is built.**
-Nothing broke, because bring-your-own-key still holds for a dogfooding build — but
-the deadline has already been missed once and the next one is real: the decision
-gates the first non-developer tester, who is criterion 9, who is the only thing
-standing between here and v0.3.
+**This was to be decided before v0.2 was planned. It was not, v0.2 is built, and
+v0.2.1 shipped past it as well.** Nothing broke, because bring-your-own-key still
+holds for a dogfooding build — but the deadline has now been missed twice, and a
+missed deadline that costs nothing twice is a deadline nobody believes. The
+decision gates the first non-developer tester, who is v0.2 criterion 9, and two
+releases have now been built without one.
 
 One thing this leaves open: abuse control. An absorbed-cost proxy with no auth is a
 free inference endpoint the moment anyone points a script at it.
 
 **The prompt-growth worry attached here is resolved.** It assumed conversation memory
-would grow the prompt every turn. It does not — v0.2 sends a capped list of at most
-fifty approved facts as a second system message, and the transcript is never sent at
-all. Growth is bounded by the cap rather than by session length, and `usage.log`
-records the per-session counts to check it against.
+would grow the prompt every turn. It does not — a capped list of approved facts goes
+out as a second system message, and the transcript is never sent at all. Growth is
+bounded by the cap rather than by session length, and `usage.log` records the
+per-session counts to check it against. v0.2.1 raised that cap from 50 × 200 to
+150 × 300 characters, which moves the ceiling and does not remove it; it also added
+one extra model call per turn for the noticing pass, which is a real cost increase
+this estimate does not yet include.
 
 **The deeper problem is that the whole estimate assumes a human typing.** A hundred
 turns a day is a rate limit imposed by hands. From v0.6 onward the agent runs without
@@ -287,7 +335,10 @@ against v0.6 before that phase is planned.
   answer on the project page, backed by the fact that the catalog is eighteen readable
   functions. v0.2 adds a second question to answer plainly — "what does it remember,
   and how do I make it forget?" — which the recall pane answers in the product but
-  nothing answers on the page.
+  nothing answers on the page. v0.2.1 adds a third and harder one: "why did it just
+  ask to remember something I never told it to?" A user who cannot answer that reads
+  an unprompted proposal as the app going through their files, which is the opposite
+  of the impression the noticing filter exists to earn.
 
 ---
 

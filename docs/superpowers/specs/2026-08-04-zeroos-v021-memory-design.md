@@ -1,4 +1,4 @@
-# ZeroOS v0.3 — Design
+# ZeroOS v0.2.1 — Design
 
 **Date:** 2026-08-04
 **Status:** Draft — not yet implemented
@@ -8,7 +8,7 @@ ignored it; this document describes only what changes. It assumes
 
 ---
 
-## 1. What v0.3 Adds
+## 1. What v0.2.1 Adds
 
 The request was that ZeroOS "remember like JARVIS". Broken into four
 behaviours, in the order of how much risk each one carries:
@@ -20,18 +20,18 @@ behaviours, in the order of how much risk each one carries:
    happened, which becomes ordinary facts if approved.
 
 Every one of them ends at the same place: a row in the existing approval
-dialog. v0.3 adds no new consent surface and no second way for anything to
+dialog. v0.2.1 adds no new consent surface and no second way for anything to
 reach the store. It does add one new outbound path to the model — the noticing
 pass of section 4 — and section 8 states what that costs.
 
-### Non-goals for v0.3
+### Non-goals for v0.2.1
 
 - **No consolidation machinery.** At the cap, the model proposes merges and the
   user approves them, exactly as v0.2 decided. Nothing automatic.
 - **No persistence for anything in flight.** Candidates live on the `Session`
   in memory, for at most one turn. There is no spool file and no recovery.
 - **No raw transcript reaching the model.** This is the same line v0.2 drew and
-  section 4 explains why v0.3's noticing pass makes it sharper, not softer.
+  section 4 explains why v0.2.1's noticing pass makes it sharper, not softer.
 - **No change to `_TEXT` in `prompt.py`.** See section 3.
 
 ### One cost this release imposes
@@ -264,7 +264,7 @@ So the distinction is not made. Every memory row starts unticked.
 
 ### What it buys
 
-The primary defence in v0.2 §6 is a dialog the user actually reads. v0.3 adds
+The primary defence in v0.2 §6 is a dialog the user actually reads. v0.2.1 adds
 unrequested rows to that dialog, which is precisely the pressure that defence was
 not designed for. Default-untick changes the failure mode of an unread dialog
 from **silent commission** to **silent omission**.
@@ -342,7 +342,7 @@ default, same store, same log. There is no privileged class of fact.
 ### `close()` ordering, and what it still promises
 
 `Session.close()` today is one line — `usage.record(...)` — and its docstring
-says it never raises, because `usage.record` swallows its own failures. v0.3
+says it never raises, because `usage.record` swallows its own failures. v0.2.1
 adds a model call and a dialog ahead of that line, so both claims need restating.
 
 **Order.** The summary turn runs first, its approved remembers go through
@@ -398,12 +398,12 @@ what it does.
 
 ---
 
-## 8. The Security Argument, Restated for v0.3
+## 8. The Security Argument, Restated for v0.2.1
 
 v0.2 §6 rests on two claims: nothing reaches the store without a dialog the user
-reads, and nothing attacker-controlled reaches the prompt. v0.3 pressures both.
+reads, and nothing attacker-controlled reaches the prompt. v0.2.1 pressures both.
 
-**On the dialog.** v0.3 puts rows in front of the user that the user did not
+**On the dialog.** v0.2.1 puts rows in front of the user that the user did not
 ask for. A dialog answered by reflex is not consent, and volume is what
 produces reflex. The answer is section 5: an unread row now stores nothing. This
 is a mitigation, not a repair — the underlying tension between "propose more"

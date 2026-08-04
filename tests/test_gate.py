@@ -191,7 +191,7 @@ def test_a_bare_filename_shows_the_home_folder(home):
 
 
 def test_a_remember_row_is_offered_unticked(home):
-    # Spec section 5. The dialog is v0.2 section 6's primary defence, and v0.3
+    # Spec section 5. The dialog is v0.2 section 6's primary defence, and v0.2.1
     # puts rows in front of the user that the user did not ask for. An unread
     # row must store nothing, so memory rows arrive unticked while action rows
     # stay pre-ticked.

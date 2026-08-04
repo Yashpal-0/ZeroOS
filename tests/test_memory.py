@@ -158,7 +158,7 @@ def test_temp_file_cleaned_up_on_write_failure(tmp_path, monkeypatch):
         assert len(temp_files) == 0, f"Temp files left behind: {temp_files}"
 
 
-def test_the_caps_are_the_v03_values():
+def test_the_caps_are_the_v021_values():
     # Spec section 6. These are load-bearing numbers, not incidental ones:
     # 150 x 300 is the ceiling the prompt-growth argument was made against.
     assert memory.MAX_FACTS == 150

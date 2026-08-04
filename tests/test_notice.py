@@ -1,4 +1,4 @@
-"""Spec section 4. The filter is the security boundary of v0.3."""
+"""Spec section 4. The filter is the security boundary of v0.2.1."""
 
 import pytest
 

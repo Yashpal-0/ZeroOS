@@ -1,4 +1,4 @@
-# ZeroOS v0.3 — Acceptance Pass
+# ZeroOS v0.2.1 — Acceptance Pass
 
 Spec §11 sets seven success criteria for this release. This document records
 the evidence for each, following the shape of
@@ -15,7 +15,7 @@ recorded here so it gets judged rather than assumed.
 > by using the app, and none of that use has happened yet.
 
 **Suite state at HEAD:** `312 passed, 0 failed`. The v0.2 baseline was 284;
-v0.3 added 28 tests.
+v0.2.1 added 28 tests.
 
 | # | Criterion | Status | Evidence |
 |---|---|---|---|
@@ -167,7 +167,7 @@ set — lets the close through.
 
 The mechanism this test pins is not the one spec §7 originally described.
 See the amendment to spec §7 for what changed and why:
-[`docs/superpowers/specs/2026-08-04-zeroos-v03-memory-design.md`](superpowers/specs/2026-08-04-zeroos-v03-memory-design.md#7-continuity).
+[`docs/superpowers/specs/2026-08-04-zeroos-v021-memory-design.md`](superpowers/specs/2026-08-04-zeroos-v021-memory-design.md#7-continuity).
 The property this criterion actually needs — that a closing dialog cannot
 delay the window's disappearance indefinitely — holds under the shipped
 mechanism too, by a different route: `_on_close` returns immediately, the

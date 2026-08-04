@@ -5,7 +5,7 @@ proposing. It knows nothing about the gate, the store, or the display: it
 takes a client and messages and returns strings, which is what lets it be
 tested without any of them.
 
-The filter is the security boundary of v0.3. Tool results carry file
+The filter is the security boundary of v0.2.1. Tool results carry file
 contents and file contents are attacker-controlled, so a pass that read
 them would let text inside a file author a memory proposal -- on every
 turn, not once. Only user messages and assistant prose go out.

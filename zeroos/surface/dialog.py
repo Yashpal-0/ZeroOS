@@ -22,7 +22,7 @@ def ask_on_main_thread(window, rows: list[tuple[str, bool]]) -> list[bool]:
     """Show the dialog from any thread and block until the user answers.
 
     Each row arrives paired with the state its box starts in. Memory rows
-    arrive unticked (spec section 5): v0.3 puts rows here that the user did
+    arrive unticked (spec section 5): v0.2.1 puts rows here that the user did
     not ask for, and an unread dialog must store nothing rather than
     everything. The gate decides the state; this function only renders it.
     """
