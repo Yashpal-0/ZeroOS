@@ -103,7 +103,7 @@ user has read the reply before being asked about it. A closing pass does the
 same for the end of a session. Every proposed row arrives **unticked** — an
 unread dialog now stores nothing, which is what makes proposing safe enough to
 do at all. A declined fact is not raised again for the rest of that session.
-The cap went from 50 × 200 to 150 × 300. Suite 317 passing; catalog unchanged
+The cap went from 50 × 200 to 950 × 1000. Suite 317 passing; catalog unchanged
 at eighteen tools.
 
 **Why a point release and not a phase.** It adds no subsystem and no action
@@ -139,7 +139,10 @@ door.
 
 Genuinely hard part, and the reason this is its own phase: MCP tools arrive with
 **unknown permission tiers**. The v0.1 model assigns tiers by hand at author time.
-That does not survive contact with arbitrary servers. Needs its own spec.
+That does not survive contact with arbitrary servers. Resolved by making every
+mounted tool confirm-tier, and by adding a `run_command` shell tool alongside —
+specified in
+[`docs/superpowers/specs/2026-08-04-zeroos-v03-mcp-design.md`](superpowers/specs/2026-08-04-zeroos-v03-mcp-design.md).
 
 ### v0.4 — Credentials
 
@@ -305,7 +308,7 @@ would grow the prompt every turn. It does not — a capped list of approved fact
 out as a second system message, and the transcript is never sent at all. Growth is
 bounded by the cap rather than by session length, and `usage.log` records the
 per-session counts to check it against. v0.2.1 raised that cap from 50 × 200 to
-150 × 300 characters, which moves the ceiling and does not remove it; it also added
+950 × 1000 characters, which moves the ceiling and does not remove it; it also added
 one extra model call per turn for the noticing pass, which is a real cost increase
 this estimate does not yet include.
 
@@ -349,8 +352,9 @@ route, and saying so here prevents them being quietly promised later.
 
 - **Absolute trust.** JARVIS never asks. v0.8 approaches that asymptotically and
   should never arrive: the log, the graduation rule, and the ability to revoke *are*
-  the product. An agent that stopped asking entirely would be the shell agent this
-  project exists to argue against, wearing better manners.
+  the product. Since v0.3 this is not a preference but the last defence — with
+  `run_command` in the catalog, an agent that stopped asking would be an
+  unattended shell.
 - **Cross-device continuity.** Achievable, but it ends local-only. That is a different
   product rather than a later one, which is why v0.9 flags it as its own go/no-go.
 - **Genuine domain expertise.** "Design me a suit" is model capability, not
@@ -358,19 +362,31 @@ route, and saying so here prevents them being quietly promised later.
 - **Reading the room.** Knowing that someone is frustrated and adjusting is the part
   of the fiction that is still fiction. Tone can be configured; it cannot be sensed.
 
-## The bet
+## The bet, and how it ended
 
-The core wager is that a **fixed, auditable catalog** beats an unbounded shell agent
-for non-technical users — that the ceiling of "it only does what was written" is
-higher in practice than the floor of "it can do anything, and sometimes does the wrong
-anything."
+The core wager was that a **fixed, auditable catalog** beats an unbounded shell
+agent for non-technical users — that the ceiling of "it only does what was
+written" is higher in practice than the floor of "it can do anything, and
+sometimes does the wrong anything."
 
-If that is wrong, the signal will be users constantly asking for things the catalog
-cannot express. That signal is worth watching from the first tester onward.
+v0.3 ends it. The catalog is no longer fixed: MCP servers add tools the user
+mounts, and `run_command` runs whatever a shell runs. This was not the wager
+being tested and lost. No tester ever reached the catalog's edge, because there
+were no testers. It was called off by the project's owner on 2026-08-04, in
+favour of reach.
 
-The bet is not settled by v0.1. MCP (v0.3) is the honest way to scale breadth without
-a shell — bounded per server rather than bounded per function — and it is the first
-real test of whether "bounded" survives contact with capability the user actually
-wants. If it does not, the failure shows up at v0.8, when a user with earned trust
-still cannot express the thing they want done. That is the moment to reconsider the
-deferred row above, and not before.
+What was staked on the bet, and what stands without it:
+
+- **The gate stands, and is now the whole defence.** Every MCP tool and
+  `run_command` are confirm-tier. Nothing runs unasked.
+- **The path sandbox does not survive `run_command`.** `PATH_ARGUMENTS` is keyed
+  by tool name, and a command line has no path argument to resolve. It guards
+  the nine catalog tools it always guarded. It guards nothing beyond them.
+- **The consent row is now load-bearing alone.** It used to be one defence among
+  several.
+
+The old prediction — failure surfacing at v0.8 when a trusted user still cannot
+express what they want — is now untestable. The replacement is narrower and
+worth watching from the first tester onward: **does anyone read the
+`run_command` row before ticking it?** If not, the graduation rule at v0.8 is
+built on sand and the tiers are ornament.
