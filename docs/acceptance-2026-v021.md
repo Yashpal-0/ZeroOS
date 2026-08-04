@@ -6,38 +6,71 @@ the evidence for each, following the shape of
 §11 — it covers a behaviour decided after the spec was written, and is
 recorded here so it gets judged rather than assumed.
 
-> **Status: PARTIAL, 2026-08-04.** The mechanical half of the walk has been
-> run and recorded below. Criteria 3, 4, 5, and 7 are CONFIRMED — each cited
-> test was run individually rather than inferred from a green suite, and
-> criterion 3's test was additionally shown able to *fail*, because a
-> security test that cannot fail is not evidence. Criterion 6 is
-> HALF-CONFIRMED: the store and the outgoing request handle 150 × 300, and
-> the fixture for the remaining half is built and waiting. Criteria 1, 2,
-> and 8 are untouched — they need a person using the app, and the person
-> who ran this half is not that person.
+> **Status: RUN, with one criterion open, 2026-08-04.** Every criterion has
+> been exercised. Criteria 3, 4, 5, and 7 are CONFIRMED from the suite —
+> each cited test run individually rather than inferred from a green run,
+> and criterion 3's mutation-checked. Criterion 6 is CONFIRMED: the store,
+> the outgoing request, and the pane were all measured at 150 × 300, the
+> pane rendered headless and looked at. Criteria 1, 2, and 8 are
+> SCRIPT-CONFIRMED — driven against the real model through the real
+> `Session`, which settles what they mechanically claim and does not settle
+> what they are actually asking. See the status vocabulary below.
+>
+> **The walk found a Critical defect and it is fixed.** Criterion 2 came back
+> with nothing proposed. The nothing was the bug, not the verdict: v0.2.1's
+> headline feature had never fired once in production. Details under
+> "What the walk found" below.
+
+**Status vocabulary.** Three words, and the difference between them is the
+point of this document.
+
+- **CONFIRMED** — a test or a measurement settles it outright.
+- **SCRIPT-CONFIRMED** — a script drove the real model through the real code
+  path and the mechanical claim held. What such a script cannot reach is
+  whether the behaviour reads, to a person, as attention or as nagging.
+  Every SCRIPT-CONFIRMED criterion below names its remaining half explicitly.
+- **NOT STARTED** — untouched.
+
+A SCRIPT-CONFIRMED criterion is not a confirmed one. Collapsing the two would
+be exactly the thing this document exists to prevent.
 
 **Who ran it.** The assistant, at the user's instruction, on 2026-08-04. It
-can run tests, mutate source, and measure payloads. It cannot look at a
-window or judge whether being proposed a fact feels like attention. Every
-criterion below that turns on either is left open on purpose rather than
-argued into a verdict.
+can run tests, mutate source, measure payloads, render the pane headless, and
+drive real sessions against the real model. It cannot judge whether being
+proposed a fact feels like attention. Every criterion that turns on that is
+left half-open on purpose rather than argued into a verdict.
 
-**Suite state at HEAD:** `316 passed, 0 failed` with `tests/test_app.py`
+**Suite state at HEAD:** `317 passed, 0 failed` with `tests/test_app.py`
 excluded — that module segfaults while a ZeroOS instance is running, because
 its `register()` returns a *remote* GApplication and `do_activate()` on a
 remote instance crashes inside GTK. Environmental, unrelated to this release,
-and it passes with the app closed (317 total). The v0.2 baseline was 284.
+and it passes with the app closed (318 total). The v0.2 baseline was 284.
 
 | # | Criterion | Status | Evidence |
 |---|---|---|---|
-| 1 | Acts on a stored fact instead of asking again | NOT STARTED | hands-on |
-| 2 | Proposes an unasked fact in ordinary use | NOT STARTED | hands-on — the release's real criterion |
+| 1 | Acts on a stored fact instead of asking again | **SCRIPT-CONFIRMED** | fact crossed a session boundary and was acted on unprompted, live |
+| 2 | Proposes an unasked fact in ordinary use | **SCRIPT-CONFIRMED** | proposed verbatim from a passing mention — *after* the defect below was fixed |
 | 3 | No tool-result text in any noticing payload | **CONFIRMED** | `tests/test_notice.py::test_tool_results_never_reach_the_noticing_request`, run alone and mutation-checked |
 | 4 | Fresh install's first request byte-identical to v0.1's | **CONFIRMED** | `tests/test_session.py::test_with_no_memories_there_is_exactly_one_system_message` |
 | 5 | Every memory row starts unticked | **CONFIRMED** | `tests/test_gate.py::test_a_remember_row_is_offered_unticked`, `tests/test_dialog.py::test_a_row_offered_unticked_starts_unticked` |
-| 6 | 150 × 300 stored, listed, and sent without the pane breaking | **HALF** | store and request measured at the cap; pane unopened |
+| 6 | 150 × 300 stored, listed, and sent without the pane breaking | **CONFIRMED** | store, request, and pane all measured at the cap; pane rendered and read |
 | 7 | Close never delayed by the summary dialog | **CONFIRMED** | `tests/test_window.py::test_close_request_halts_the_close_until_the_summary_finishes` |
-| 8 | A declined proposal is not raised again this session | NOT STARTED | hands-on |
+| 8 | A declined proposal is not raised again this session | **SCRIPT-CONFIRMED** | holds within the noticing path; **does not hold across paths** — see the finding |
+
+### How the live criteria were run
+
+Criteria 1, 2 and 8 were driven by a script that builds real `Session`
+objects against the real model, with a recorder standing in for the consent
+dialog. Each criterion got its **own** `ZEROOS_HOME`, with `XDG_DATA_HOME`
+unset, and each run asserts its resolved `data_dir()` is inside that fixture
+before anything writes — the user's real store is never opened. The API key
+is read from the environment inside the process and never printed, logged,
+or written anywhere.
+
+Separate homes are not tidiness. Criterion 6's fixture holds 150 facts at the
+cap; a criterion 1 run pointed at it would have every `remember` refused for
+space and would read as "memory does not persist" — a false negative for the
+wrong reason.
 
 ### The run
 
@@ -56,6 +89,73 @@ tests/test_window.py::test_close_request_halts_the_close_until_the_summary_finis
 5 passed, 4 warnings in 2.24s
 ```
 
+## What the walk found
+
+### Critical, now fixed — the noticing pass had never fired
+
+Criterion 2's first live run proposed nothing at all. `notice.candidates()`
+returns `[]` both when it finds nothing and when it throws, so "nothing" is
+never self-explaining; a probe against the same transcript discriminated it:
+
+```
+finish_reason: length
+reasoning_tokens: 200   completion_tokens: 202   content: None
+```
+
+`MODEL` is a reasoning model. At `notice.MAX_TOKENS = 200` it spent the entire
+budget thinking, was cut off before writing a single character of content, and
+returned `content=None` — which `candidates()` reads as "found nothing".
+**v0.2.1's headline feature had never produced a candidate in production.**
+Every green test in `tests/test_notice.py` passed throughout, because they all
+feed a fake client a canned reply; none of them could see the request's token
+budget.
+
+Raising the budget is not the fix. At 1200 the model reasoned for all 1200 and
+still returned `None` — the reasoning expands to whatever it is given. Two
+things actually work:
+
+| Attempt | reasoning tokens | content |
+|---|---|---|
+| `MAX_TOKENS` 200 (shipped) | 200 | `None` |
+| `MAX_TOKENS` 1200 | 1200 | `None` |
+| `reasoning: {enabled: false}`, 200 | 0 | the fact, verbatim |
+| `MAX_TOKENS` 65536, reasoning auto | 1170 | the fact, verbatim |
+
+**USER RULING:** the ceiling, with reasoning left on. `notice.MAX_TOKENS` and
+`session.MAX_TOKENS` are both now 65536, `MODEL`'s `max_completion_tokens`.
+It is a ceiling and not a spend — a pass that reasons for ~1200 tokens is
+billed for ~1200 — but it does mean the noticing pass now bills roughly
+**1,200 reasoning tokens per turn (~$0.00016)** that the shipped version was
+not paying, because the shipped version was not working. Pinned by
+`tests/test_notice.py::test_the_noticing_request_asks_for_room_to_think`.
+
+The general lesson is worth more than the fix: a function that swallows its
+own failure into an ordinary-looking return value cannot be trusted to tell
+you it is healthy, and no amount of testing it with a fake client will find
+that out. It took running the thing for real.
+
+### Important, not fixed — a decline only sticks within one path
+
+Criterion 8's run showed the same fact proposed twice in one session, by two
+different routes:
+
+```
+turn 1   Remember: "Yash's tax paperwork is stored in Documents/Tax folder"
+turn 2   Remember: "My tax paperwork all lives in the Documents folder, in a folder called Tax."
+```
+
+Turn 1 is the model calling `remember` itself, having read the sentence as a
+request. Turn 2 is the noticing pass offering the same fact in the user's own
+words. `Session._offered` records only what the *noticing* path has offered,
+so declining the model's own `remember` does not stop the noticing pass
+raising the same thing on the next turn — which is precisely the erosion
+`_offered` was added to prevent, one route over.
+
+Not fixed here, deliberately. The two texts are not equal as strings and never
+will be, so suppressing the second means comparing them by meaning — which is
+the consolidation machinery the standing ruling excludes. Recorded for a
+decision rather than solved by reflex.
+
 ### One finding, from criterion 6's measurement
 
 At the cap the injected memory block is **47,107 characters — about 11,800
@@ -71,28 +171,42 @@ roadmap because it was measured here.
 
 ## Criterion 1 — Acts on a stored fact instead of asking again
 
-**NOT STARTED.**
+**SCRIPT-CONFIRMED, 2026-08-04.**
 
 Spec §11.1: "With a fact stored that bears on the request, the assistant
 acts on it instead of asking for it again." This is model behaviour on a
 live reply, not a return value a mock client can stand in for. A test can
 prove a fact was *sent* — that is criterion 4's job, and v0.2's before it —
 but nothing in the suite can prove a reply *used* what was sent rather than
-asking the question the fact already answers. Only watching a real reply
-settles that.
+asking the question the fact already answers.
 
-### Protocol
+So it was run for real. Session A stored a fact and closed. Session B is a
+fresh `Session` object over the same store, and its question deliberately
+avoids the words "thesis", "Documents", and "remember":
 
-**Before opening the app:** store one fact by asking for it directly, then
-close the session so it becomes ordinary state rather than something fresh
-in the current context. In a later session, make a request that fact bears
-on, without mentioning the fact. Write down, before that request is sent,
-what the reply is predicted to do.
+```
+-- session A --
+  [dialog] ['Remember: "my thesis chapters live in the Thesis folder inside Documents"']
+A reply: Done.
+stored after A: ['my thesis chapters live in the Thesis folder inside Documents']
 
-**Prediction:** _to be recorded here, before the request is sent._
+-- session B, fresh object, same store --
+injected block:
+Things the user has asked you to remember. ...
+[ee293d15] my thesis chapters live in the Thesis folder inside Documents
 
-**Answer:** _to be recorded here_ — the actual reply, and whether it matched
-the prediction.
+B asks: Where should I save the new chapter draft I just finished?
+B reply: Your new chapter draft should go in the Thesis folder inside Documents, Sir.
+
+RESULT: reply refers to the remembered location: True
+```
+
+The fact crossed the session boundary, reached the request, and was acted on
+without being mentioned. That is the mechanical claim, and it holds.
+
+**What this does not settle.** Whether the assistant finds a *subtler*
+connection than one staged for it. See the conflict below — it is the reason
+this is SCRIPT-CONFIRMED and not CONFIRMED.
 
 **Author-is-tester conflict.** The person running this protocol chooses both
 the fact and the request it bears on, and picks the request specifically
@@ -104,14 +218,58 @@ for it to find.
 
 ## Criterion 2 — Proposes an unasked fact in ordinary use
 
-**NOT STARTED.** This is the criterion spec §11 calls "the one the whole
-release is for," and it gets the least mechanical help of the seven.
-`tests/test_notice.py` proves the noticing pass can produce a candidate from
-a fixture transcript and proves the security filter around it holds. It
-proves nothing about whether an unprompted proposal shows up in a
-conversation a person is actually having.
+**SCRIPT-CONFIRMED, 2026-08-04 — and this is the criterion that found the
+defect.** This is the one spec §11 calls "the one the whole release is for,"
+and it gets the least mechanical help of the seven. `tests/test_notice.py`
+proves the noticing pass can produce a candidate from a fixture transcript
+and proves the security filter around it holds. It proves nothing about
+whether an unprompted proposal shows up in a conversation a person is
+actually having — which is exactly why it was the criterion that noticed
+the pass was dead.
 
-### Protocol
+**First run, against the shipped code:**
+
+```
+pending after turn 1: []
+proposed texts: []
+RESULT: something was proposed unprompted: False
+```
+
+That is not "there was nothing worth noticing". That is the pass returning
+`[]` because its budget was spent on reasoning — see "What the walk found".
+
+**Second run, after the fix.** A fact mentioned in passing inside a turn
+whose actual request is about something else:
+
+```
+turn 1: The printer only works when it is plugged into the left-hand USB port,
+        took me all morning to work that out. Anyway, how many files are in my
+        Downloads folder?
+reply:  I cannot find a Downloads folder in your home directory, Sir.
+
+pending after turn 1: ['The printer only works when it is plugged into the left-hand USB port.']
+
+turn 2 (ordinary, unrelated -- this is what opens the dialog):
+  [dialog] ['Remember: "The printer only works when it is plugged into the left-hand USB port."']
+
+RESULT: something was proposed unprompted: True
+```
+
+**The paraphrase check — the sharpest part of this criterion, and it is
+mechanical.** §11.2 asks whether the proposed text matches what was said
+rather than a flattering rewrite. Compare:
+
+- said: *"The printer only works when it is plugged into the left-hand USB port, took me all morning to work that out."*
+- proposed: *"The printer only works when it is plugged into the left-hand USB port."*
+
+Word for word, with only the trailing aside dropped. No summary, no
+improvement, nothing the user did not say. This half is settled.
+
+**What this does not settle.** Whether an unrequested proposal, arriving in
+the middle of a real session nobody staged, reads as attention or as
+nagging. That is the rest of criterion 2 and no script reaches it.
+
+### Protocol for the remaining half
 
 **Day one:** use ZeroOS for an ordinary session — real requests, not ones
 staged to bait a proposal — and, at some point, mention something in
@@ -121,7 +279,12 @@ preference stated once, not framed as an instruction to remember it.
 **Before the next session opens:** write down a prediction — will a
 proposal appear, and roughly what will it say.
 
-**Prediction:** _to be recorded here, before the next session opens._
+**Prediction:** _to be recorded here, before the next session opens, by the
+person who will grade it._ Deliberately left blank by the assistant. This
+instrument works only because the grader commits before seeing the outcome;
+a prediction written and then graded by the same party that ran the script
+is theatre, and writing one here would have destroyed the only thing the
+protocol was for.
 
 **Day two:** open the app and record what actually happened — did a
 `remember` row appear unprompted, what did its text say, and does that text
@@ -196,8 +359,9 @@ can forge.
 
 ## Criterion 6 — 150 × 300 stored, listed, and sent without the pane breaking
 
-**HALF-CONFIRMED, 2026-08-04.** The store and the outgoing request were
-measured at the true worst case. The pane has not been opened.
+**CONFIRMED, 2026-08-04.** The store, the outgoing request, and the pane were
+all measured at the true worst case. The pane was built, counted, deleted
+from, and rendered to an image and looked at.
 
 **Stored.** 150 facts written through `memory.add()` itself rather than
 hand-written JSON, so the record shape is correct by construction. Every
@@ -222,8 +386,43 @@ every turn is the number this criterion existed to discover, and it is worth
 carrying to the roadmap's billing gate rather than leaving here — see the
 finding at the top of this document.
 
-**The remaining half, with the fixture already built.** A populated home is
-waiting; launching against it needs no setup:
+**Listed.** The real `recall.build()` pane was constructed against that store
+under Xvfb and its widget tree walked:
+
+```
+before: rows=151 fact_rows=150
+every stored fact has a row, in store order: OK
+longest row title: 300 chars
+title-lines property: 0
+after one delete: rows=150 fact_rows=149
+delete at 150 removed exactly one row and one record: OK
+```
+
+Every stored fact has a row, in store order, with no truncation of the title —
+`title-lines = 0` means unlimited, so a 300-character fact wraps rather than
+being clipped. The 151st row is "Forget everything". Deleting a row at 150
+removes exactly one row and exactly one record, and `_redraw()` survives
+rebuilding the whole list.
+
+**Looked at.** Rendered to PNG through `GskRenderer.render_texture` and read:
+
+- Rows wrap to seven or eight lines and show the fact in full. Nothing is
+  clipped, nothing runs off the window.
+- The timestamp subtitle stays legible under the wrapped title.
+- The trash button stays vertically centred and reachable on every row,
+  including the tallest.
+- No layout failure, no overlap, no collapsed row.
+
+Legible, not merely mapped. The v0.2 defect this criterion was written to
+catch does not reproduce at 150 × 300.
+
+**One usability observation, not a defect.** A 300-character fact renders at
+roughly 100 px tall, so a full store is on the order of 15,000 px of
+scrolling — about fifteen screens — with no search and no grouping. Every
+row is individually fine; finding a particular one is not. Worth knowing
+before the cap is raised again.
+
+**The fixture, if it is wanted by hand.** A populated home is waiting:
 
 ```bash
 env -u XDG_DATA_HOME \
@@ -236,13 +435,6 @@ this; `XDG_DATA_HOME` must be unset alongside it or `data_dir()` wins and the
 real store is used instead. The real memory store is untouched by this
 walk. Note the fixture is in a scratch directory and will not survive a
 reboot — rebuild it with the same script if it is gone.
-
-**What is still to judge, and only by looking:** whether 150 rows are all
-present, whether the pane stays scrollable and legible rather than merely
-mapped, and whether deleting a row still works at that count. v0.2's
-acceptance pass found a legibility defect at a much smaller size that no
-string-level test could see, which is the whole reason this criterion is
-hands-on.
 
 ### Original notes
 
@@ -290,10 +482,44 @@ thread finishes, rather than being hidden beforehand.
 
 ## Criterion 8 — A declined proposal is not raised again this session
 
-**NOT STARTED.** Evidence:
+**SCRIPT-CONFIRMED within the noticing path, 2026-08-04 — and it does not
+hold across paths.** Evidence:
 `tests/test_session.py::test_a_declined_candidate_is_not_proposed_again_this_session`,
 which runs three turns with the noticing pass returning the same fact every
 time and the user declining, and asserts the dialog saw it exactly once.
+
+**Live run.** A fact stated, the proposal declined, then three more turns
+still on the same subject, then a close with the summary enabled:
+
+```
+turn 1: My tax paperwork all lives in the Documents folder, in a folder called Tax.
+  [dialog] ['Remember: "Yash's tax paperwork is stored in Documents/Tax folder"']
+
+turn 2 -- the dialog opens here and is declined:
+  [dialog] ['Remember: "My tax paperwork all lives in the Documents folder, in a folder called Tax."']
+
+turns 3 and 4 -- still talking about the same subject:
+dialogs so far: 2
+
+close(summary=True):
+dialogs after close: 2
+
+RESULT: nothing was stored: True
+RESULT: proposed exactly once, never again: True
+```
+
+The noticing path behaves: proposed once, declined, never raised again —
+including from the closing summary, which is the part no existing test
+covered. Nothing reached the store.
+
+**But look at turn 1.** That dialog is a *different* path — the model calling
+`remember` itself, having read the sentence as a request — and it is the same
+fact in different words. Declining it did not stop the noticing pass asking
+again on turn 2. `Session._offered` tracks only what the noticing path has
+offered, so a decline sticks within one route and not across the two. This is
+recorded in full under "What the walk found" and is left for a decision, not
+patched: matching those two strings means matching them by meaning, which is
+the consolidation machinery the standing ruling excludes.
 
 Added after the spec was written, so it is here rather than in spec §11 —
 see the "offered once per session" subsection of spec §4 for the reasoning.
@@ -302,12 +528,11 @@ on every turn: without suppression, a declined fact returns on the next
 turn and the next, and a dialog that keeps asking the same question is how
 consent decays into reflex, which is the exact failure spec §8 names.
 
-This criterion is behavioural, not mechanical, and the tests cannot close
-it: what matters is whether being asked once and then left alone *feels*
-like being listened to. Judge it during the sittings for criteria 1 and 2
-rather than in its own session.
+What the script cannot close: whether being asked once and then left alone
+*feels* like being listened to. Judge that during the sittings for criteria
+1 and 2 rather than in its own session.
 
-### Protocol
+### Protocol for the remaining half
 
 **Setup:** in one session, decline a proposed fact. Keep talking about the
 same subject for several more turns.
