@@ -24,7 +24,7 @@ from zeroos.policy.tiers import tier_of
 
 BASE_URL = "https://openrouter.ai/api/v1"
 MODEL = "qwen/qwen3.7-flash"
-MAX_TOKENS = 4096
+MAX_TOKENS = 65536
 
 # Not a budget — a runaway stop. A long task is allowed to take as many round
 # trips as it needs; this only exists so a model stuck in a call/answer cycle

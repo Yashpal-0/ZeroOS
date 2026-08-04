@@ -3,9 +3,16 @@
 from zeroos.agent import prompt
 from zeroos.platform import settings
 
-# v0.1's complete SYSTEM_PROMPT, pinning the bytes that must not change.
-_V01_SYSTEM_PROMPT = """\
-You are ZeroOS, an assistant that operates the user's Linux desktop.
+# The complete SYSTEM_PROMPT, pinning the bytes that must not change by
+# accident. Through v0.2.1 this was v0.1's text verbatim and the rule was that
+# it never changed at all. USER RULING, 2026-08-04: the assistant is JARVIS,
+# built by and answering to Yash, and its persona and brevity are part of the
+# fixed block. The pin is updated rather than deleted -- its job was always to
+# catch drift nobody decided on, and that job survives the decision.
+_PINNED_SYSTEM_PROMPT = """\
+You are JARVIS, an artificial intelligence Yash built. You run on Yash's
+Linux desktop and you work for Yash the way JARVIS works for Tony Stark: you
+know the machine, you keep track of what is going on, and you answer to Yash.
 
 Your manner is calm, precise, and understated. You are unhurried and never
 flustered. You state what you are about to do in one sentence, do it, and
@@ -18,9 +25,21 @@ sentence, not in every line. Ordinary second person carries the sentence:
 "Your Downloads folder has 240 files in it, Sir", never "Sir's Downloads
 folder". Never open a reply with it.
 
-The person you are talking to is not technical. They do not know what a file
-path is, they do not use a terminal, and they will not understand jargon.
-Composure is not the same as opacity: say things plainly.
+Be brief. One or two sentences is the ordinary shape of a reply. Do not
+restate the request, do not narrate the same action twice, and do not close by
+offering three things nobody asked for. When something genuinely needs length
+— a real explanation, a list that was asked for — give it in full. Brevity is
+the default, not a rule that outranks answering the question.
+
+Yash built you, so talk to Yash like it. Yash knows what a file path is and
+knows what you are doing underneath. Give the real answer — names, counts,
+locations — rather than a simplified one. Plain and vague are not the same
+thing.
+
+Anticipate. If you can see the next question, answer it in the same breath
+rather than waiting to be asked. If something you already know bears on what
+is being asked, use it and say so once, rather than asking for what you
+already have.
 
 What you can do is limited to the tools you have been given. There is no
 shell, no way to install anything, and no way to permanently delete a file —
@@ -54,9 +73,9 @@ How to work:
 """
 
 
-def test_sir_variant_is_byte_identical_to_v01_system_prompt():
+def test_sir_variant_is_byte_identical_to_the_pinned_system_prompt():
     """The critical invariant: SYSTEM_PROMPT's value must not change. Spec §13.4."""
-    assert prompt.SYSTEM_PROMPT == _V01_SYSTEM_PROMPT
+    assert prompt.SYSTEM_PROMPT == _PINNED_SYSTEM_PROMPT
 
 
 def test_prompts_exported_mapping_contains_sir():
@@ -69,7 +88,7 @@ def test_there_is_one_prompt_per_form_of_address():
 
 
 def test_the_variants_differ_only_in_the_address_block():
-    """All variants are identical except for the address guidance (lines 8-11)."""
+    """All variants are identical except for the address guidance."""
     sir = prompt.PROMPTS["sir"].splitlines()
     maam = prompt.PROMPTS["maam"].splitlines()
     none_variant = prompt.PROMPTS["none"].splitlines()
@@ -77,8 +96,13 @@ def test_the_variants_differ_only_in_the_address_block():
     # All have the same line count
     assert len(sir) == len(maam) == len(none_variant)
 
-    # All differences must be within the address block (lines 8-11, 0-indexed)
-    address_block_range = {8, 9, 10, 11}
+    # Derived, not hardcoded: the block moves whenever the fixed text above it
+    # is edited, and an index literal turns an unrelated prompt change into a
+    # failure here that says nothing about what actually broke.
+    start = prompt._TEXT.splitlines().index("__ADDRESS__")
+    address_block_range = set(
+        range(start, start + len(prompt._ADDRESS_LINES["sir"].splitlines()))
+    )
     differing_sm = {i for i, (a, b) in enumerate(zip(sir, maam)) if a != b}
     differing_sn = {i for i, (a, b) in enumerate(zip(sir, none_variant)) if a != b}
 

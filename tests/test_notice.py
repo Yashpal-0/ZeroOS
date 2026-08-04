@@ -105,3 +105,18 @@ def test_a_failing_client_yields_no_candidates_and_does_not_raise():
 
 def test_an_empty_transcript_yields_nothing():
     assert notice.candidates(FakeClient(reply="something"), []) == []
+
+
+def test_the_noticing_request_asks_for_room_to_think():
+    # Regression, found by the v0.2.1 acceptance walk. MODEL is a reasoning
+    # model. At the old cap of 200 it spent every token reasoning and returned
+    # finish_reason="length" with content=None, which candidates() cannot tell
+    # apart from finding nothing -- so the pass silently never fired at all and
+    # criterion 2 came back empty for the wrong reason. Raising the cap to 1200
+    # did not help: the model reasoned for all 1200 and still returned None.
+    # Only the model's own ceiling is safe, because any lower number is a guess
+    # at how long a given conversation takes to think about.
+    client = FakeClient(reply="a fact")
+    notice.candidates(client, TRANSCRIPT)
+    assert client.requests[0]["max_tokens"] == notice.MAX_TOKENS
+    assert notice.MAX_TOKENS == 65536, "MODEL's max_completion_tokens"
