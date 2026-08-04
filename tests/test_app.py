@@ -48,8 +48,13 @@ def test_do_activate_handles_a_keyring_failure_then_a_stored_key(monkeypatch, ca
 def _accept_onboarding_and_check_it_hands_off_to_the_chat_window(application, monkeypatch, capsys):
     # Reuses the application registered above -- GApplication allows only one
     # primary instance per application_id per process (see module docstring).
+    # destroy(), not close(): this is test cleanup, not an exercise of
+    # close-request. ChatWindow's close-request now halts the close and
+    # finishes on a worker thread (Task 6), so close() here would leave the
+    # leftover window merely hidden, not gone, and get_windows()[-1] below
+    # -- ordered by focus, not creation -- would find it instead of onboarding.
     for leftover in list(application.get_windows()):
-        leftover.close()
+        leftover.destroy()
 
     monkeypatch.setattr(credentials, "load", lambda: (_ for _ in ()).throw(OSError("no key")))
     application.do_activate()  # onboarding branch

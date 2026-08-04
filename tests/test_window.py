@@ -86,14 +86,55 @@ def test_the_header_bar_has_a_button_that_opens_the_recall_pane(monkeypatch):
     assert opened == [chat], "the button must actually build the pane, not just exist"
 
 
+class _SyncThread:
+    """Stands in for threading.Thread: runs the target immediately instead of
+    on a real thread, so a test can assert on its effect right after emit()
+    without racing a background thread it has no handle to."""
+
+    def __init__(self, target, daemon=None):
+        self._target = target
+
+    def start(self) -> None:
+        self._target()
+
+
 def test_closing_the_window_records_the_session(monkeypatch):
     chat, _ = _window(monkeypatch)
+    monkeypatch.setattr(window, "threading", type("_T", (), {"Thread": _SyncThread}))
     assert chat._session.closed == 0
     chat.emit("close-request")
     assert chat._session.closed == 1, (
         "nothing else in the app calls close(), so an unwired close-request "
         "means the usage line is never written"
     )
+
+
+class _CapturingThread:
+    """Stands in for threading.Thread: records the target instead of running
+    it, so a test can assert on _on_close's synchronous effects -- the halt,
+    the flag -- without the target's own work (session.close()) having run
+    yet. Running it inline here would prove nothing: a deadlocking _on_close
+    and a correct one look identical if start() runs the target immediately."""
+
+    def __init__(self, target, daemon=None):
+        self.target = target
+
+    def start(self) -> None:
+        pass
+
+
+def test_close_request_halts_the_close_until_the_summary_finishes(monkeypatch):
+    # ask_on_main_thread does GLib.idle_add then blocks on the event. Called
+    # from the main thread -- which is where close-request runs -- the idle
+    # callback can never fire, because the main loop is sitting inside wait().
+    # It deadlocks every time. So the close is halted, the work moves to a
+    # worker thread, and the window is destroyed when it comes back.
+    chat, _ = _window(monkeypatch)
+    monkeypatch.setattr(window, "threading", type("_T", (), {"Thread": _CapturingThread}))
+    assert chat._on_close(chat) is True, "the first close-request must halt"
+    assert chat._session.closed == 0, "close() must not run on the calling thread"
+    chat._closing = True
+    assert chat._on_close(chat) is False, "the second must let it through"
 
 
 class _NoOpDialog:

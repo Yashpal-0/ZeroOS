@@ -38,6 +38,7 @@ class ChatWindow(Adw.ApplicationWindow):
                          title="ZeroOS")
         self._session = Session(api_key=api_key, ask=lambda rows: ask_on_main_thread(self, rows))
         self._busy = False
+        self._closing = False
 
         _watch_clipboard(Gdk.Display.get_default().get_clipboard())
 
@@ -69,8 +70,31 @@ class ChatWindow(Adw.ApplicationWindow):
         self.connect("close-request", self._on_close)
 
     def _on_close(self, _window) -> bool:
-        self._session.close()
-        return False
+        """Halt the close, run the closing summary off the main thread, then
+        destroy for real.
+
+        session.close() may open the approval dialog, and
+        dialog.ask_on_main_thread does GLib.idle_add followed by a blocking
+        wait. Called from the main thread -- which is where close-request
+        runs -- the idle callback can never fire, because the main loop is
+        inside that wait. It deadlocks every time.
+
+        The window stays visible until close() returns: ask_on_main_thread's
+        dialog is presented on this window (dialog.present(window)), so
+        hiding the window first would present the dialog on a parent that
+        is not on screen, and the user could never answer it. destroy() at
+        the end takes the window away, dialog and all, in one step.
+        """
+        if self._closing:
+            return False
+        self._closing = True
+
+        def finish() -> None:
+            self._session.close()
+            GLib.idle_add(self.destroy)
+
+        threading.Thread(target=finish, daemon=True).start()
+        return True
 
     def _append(self, who: str, text: str) -> None:
         label = Gtk.Label(label=text, wrap=True, xalign=0, selectable=True)

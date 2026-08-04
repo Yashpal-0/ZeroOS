@@ -424,6 +424,55 @@ def test_close_writes_no_message_content(home):
     assert "secret" not in usage.path().read_text(encoding="utf-8")
 
 
+def test_the_closing_summary_is_counted_before_the_usage_line(home, monkeypatch):
+    # A summary remember approved on the way out increments _actions via _run.
+    # If usage.record ran first, the line would undercount the session it is
+    # describing.
+    from zeroos.platform import memory
+
+    monkeypatch.setattr(
+        "zeroos.agent.notice.candidates", lambda client, messages: ["a closing fact"]
+    )
+    recorded = {}
+    monkeypatch.setattr(
+        "zeroos.agent.usage.record",
+        lambda started, turns, actions, declined: recorded.update(actions=actions),
+    )
+    session, _, _ = build_session(
+        [FakeMessage(content="Done.")], [], ask=lambda rows: [True] * len(rows)
+    )
+    session.send("hi")
+    session.close()
+    assert recorded["actions"] >= 1
+    assert [f["text"] for f in memory.load()] == ["a closing fact"]
+
+
+def test_close_never_raises_when_the_summary_fails(home, monkeypatch):
+    # A network failure on the way out must not take shutdown down, and there
+    # is nothing a user can do about it once the window is already gone.
+    # Patched in after send(): notice.candidates already ran once, clean, as
+    # part of that turn. What this test pins is close()'s own guard around
+    # its closing-summary call, not send()'s ordinary one.
+    def explode(client, messages):
+        raise RuntimeError("network")
+
+    session, _, _ = build_session([FakeMessage(content="Done.")], [])
+    session.send("hi")
+    monkeypatch.setattr("zeroos.agent.notice.candidates", explode)
+    session.close()  # must return normally
+
+
+def test_close_with_nothing_to_summarise_opens_no_dialog(home, monkeypatch):
+    monkeypatch.setattr("zeroos.agent.notice.candidates", lambda client, messages: [])
+
+    def ask(rows):
+        raise AssertionError("no dialog when there is nothing to summarise")
+
+    session, _, _ = build_session([FakeMessage(content="Done.")], [], ask=ask)
+    session.send("hi")
+    session.close()
+
+
 def test_the_loop_is_bounded(home, monkeypatch):
     # A model that never stops calling tools must not hang the app. The real
     # ceiling is 1000; shrink it here so the test does not send 1000 requests

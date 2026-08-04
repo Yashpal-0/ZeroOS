@@ -203,8 +203,23 @@ class Session:
             self._run("remember", {"text": text})
 
     def close(self) -> None:
-        """Called once, on window shutdown. Never raises — usage.record swallows
-        its own failures, and a usage line is never worth losing a shutdown."""
+        """Called once, on window shutdown. Never raises.
+
+        Order matters: the closing summary's approved remembers go through
+        _run and increment _actions, so usage.record must come last or the
+        line undercounts the session it describes.
+
+        The summary carries the same guard as the noticing pass. A network
+        failure on the way out must not take shutdown down with it, and
+        there is nothing a user can do about a failed summary at the moment
+        the window has already gone. usage.record swallows its own failures
+        separately.
+        """
+        try:
+            self._pending = notice.candidates(self._client, self._messages)
+            self._offer_candidates()
+        except Exception:
+            pass
         usage.record(self._started, self._turns, self._actions, self._declined)
 
     def _run(self, name: str, arguments: dict) -> str:
