@@ -54,9 +54,11 @@ class _StubSession:
 
     def __init__(self, *args, **kwargs):
         self.closed = 0
+        self.summaries = []
 
-    def close(self):
+    def close(self, summary=True):
         self.closed += 1
+        self.summaries.append(summary)
 
 
 def _window(monkeypatch):
@@ -133,8 +135,40 @@ def test_close_request_halts_the_close_until_the_summary_finishes(monkeypatch):
     monkeypatch.setattr(window, "threading", type("_T", (), {"Thread": _CapturingThread}))
     assert chat._on_close(chat) is True, "the first close-request must halt"
     assert chat._session.closed == 0, "close() must not run on the calling thread"
-    chat._closing = True
+    assert chat._closing is True, (
+        "the first call must set the flag itself -- setting it here instead "
+        "would let an _on_close that never sets it pass, and in the app that "
+        "spawns a second close() thread on a second X press"
+    )
     assert chat._on_close(chat) is False, "the second must let it through"
+
+
+def test_closing_during_a_turn_skips_the_summary(monkeypatch):
+    # Spec section 7: the summary is skipped entirely when the model is
+    # mid-turn. The summary's dialog routes through gate.prepare(), which
+    # opens by clearing the consent ledger -- under a live turn that makes the
+    # turn re-ask for an action the user has already approved.
+    chat, _ = _window(monkeypatch)
+    monkeypatch.setattr(window, "threading", type("_T", (), {"Thread": _SyncThread}))
+    scheduled = []
+    monkeypatch.setattr(window.GLib, "idle_add", lambda callback, *a: scheduled.append(callback))
+
+    chat._busy = True
+    chat.emit("close-request")
+
+    assert chat._session.summaries == [False], "a turn in flight means no summary"
+    assert chat.destroy in scheduled, "the window must still go away"
+
+
+def test_closing_between_turns_still_runs_the_summary(monkeypatch):
+    # The complement: without this, skipping unconditionally would pass.
+    chat, _ = _window(monkeypatch)
+    monkeypatch.setattr(window, "threading", type("_T", (), {"Thread": _SyncThread}))
+    monkeypatch.setattr(window.GLib, "idle_add", lambda callback, *a: None)
+
+    chat.emit("close-request")
+
+    assert chat._session.summaries == [True]
 
 
 class _NoOpDialog:

@@ -84,13 +84,23 @@ class ChatWindow(Adw.ApplicationWindow):
         hiding the window first would present the dialog on a parent that
         is not on screen, and the user could never answer it. destroy() at
         the end takes the window away, dialog and all, in one step.
+
+        A turn still in flight means no closing summary, per spec section 7:
+        the summary's dialog would clear the consent ledger out from under the
+        running turn. The flag is read here, on the main thread, and handed to
+        the worker as a value. Every other read and write of _busy is on the
+        main thread too -- _on_submit is a signal handler, and the two clears
+        arrive by idle_add -- and that is the whole reason a flag is enough
+        where a lock would otherwise be needed. Reading it inside finish()
+        would be a read from the worker and would give that reason away.
         """
         if self._closing:
             return False
         self._closing = True
+        summary = not self._busy
 
         def finish() -> None:
-            self._session.close()
+            self._session.close(summary=summary)
             GLib.idle_add(self.destroy)
 
         threading.Thread(target=finish, daemon=True).start()

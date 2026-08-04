@@ -498,11 +498,16 @@ def test_a_turn_that_produces_candidates_does_not_show_a_dialog(home, monkeypatc
         "zeroos.agent.notice.candidates", lambda client, messages: ["a noticed fact"]
     )
 
-    def ask(rows):
-        raise AssertionError("no dialog may open during the turn that noticed")
-
-    session, _, _ = build_session([FakeMessage(content="Done.")], [], ask=ask)
+    # Recorded rather than raised: _offer_candidates swallows exceptions, so
+    # an ask that raised would be silently absorbed and this test would pass
+    # against the very regression it exists to catch.
+    seen = []
+    session, _, _ = build_session(
+        [FakeMessage(content="Done.")], [],
+        ask=lambda rows: (seen.append(list(rows)), [False] * len(rows))[1],
+    )
     assert session.send("hi") == "Done."
+    assert seen == [], "no dialog may open during the turn that noticed"
 
 
 def test_candidates_are_offered_at_the_start_of_the_next_turn(home, monkeypatch):
@@ -599,3 +604,50 @@ def test_candidates_are_offered_once_and_not_again(home, monkeypatch):
     session.send("b")
     session.send("c")
     assert len(seen) == 1
+
+
+def test_a_declined_candidate_is_not_proposed_again_this_session(home, monkeypatch):
+    # The noticing pass reads the whole accumulated transcript every turn, so
+    # the turn that produced a fact stays in view and the pass keeps finding
+    # it. Without a record of what was already offered, the user who unticks
+    # a row is asked about the same fact on every subsequent turn until they
+    # give in -- a dialog that re-asks after a refusal is not consent.
+    fact = "my tax stuff is in Documents"
+    monkeypatch.setattr("zeroos.agent.notice.candidates", lambda client, messages: [fact])
+    seen = []
+    session, _, _ = build_session(
+        [FakeMessage(content="One."), FakeMessage(content="Two."), FakeMessage(content="Three.")],
+        [],
+        ask=lambda rows: (seen.append([text for text, _ticked in rows]), [False] * len(rows))[1],
+    )
+    session.send("a")
+    session.send("b")
+    session.send("c")
+    assert len(seen) == 1, "the fact must reach the dialog once, not once per turn"
+    # Asserted on the text, not just the count, so the test cannot pass
+    # vacuously if the noticing pass starts returning nothing at all.
+    assert fact in seen[0][0]
+
+
+def test_a_close_during_a_turn_skips_the_summary_but_still_records(home, monkeypatch):
+    # Spec section 7. close() runs on a second thread while the turn's own
+    # thread is still in the step loop; the summary's prepare() would clear
+    # the consent ledger under it. The usage line is not part of the summary
+    # and must still be written -- it describes the session, and it is the
+    # only record that the session happened.
+    recorded = []
+    monkeypatch.setattr(
+        session_module.usage, "record",
+        lambda started, turns, actions, declined: recorded.append(turns),
+    )
+
+    session, _, client = build_session([FakeMessage(content="Done.")], [])
+    session.send("hi")
+    before = len(client.requests)
+
+    session.close(summary=False)
+
+    # The request count is what discriminates: notice.candidates swallows its
+    # own failures, so a summary that did run would leave no other trace here.
+    assert len(client.requests) == before, "the closing pass must not be sent"
+    assert recorded == [1], "the usage line must be written even with no summary"

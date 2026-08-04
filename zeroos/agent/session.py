@@ -110,6 +110,15 @@ class Session:
         # Candidates from the previous turn, waiting to be offered. In memory
         # and for at most one turn: there is no spool file and no recovery.
         self._pending: list[str] = []
+        # Every candidate text this session has already put in front of the
+        # user. The noticing pass reads the whole accumulated transcript every
+        # turn, so a fact the user declined would otherwise be proposed again
+        # on the next turn, and the next, until they gave in and ticked it --
+        # which is the consent model eroding. What is recorded is what was
+        # offered, not what was refused: an approved fact is already stored, so
+        # not re-offering it is equally right. Dies with the session; a fresh
+        # one may raise the same fact again, and nothing reaches disk.
+        self._offered: set[str] = set()
 
     def send(self, text: str) -> str:
         """Run one turn to completion and return the model's final text."""
@@ -187,23 +196,50 @@ class Session:
 
         Runs before the step loop, so the loop's own prepare() clears a ledger
         whose entries have already been consumed. Drained first: offering the
-        same candidate twice would ask about a fact already answered.
+        same candidate twice would ask about a fact already answered. Filtered
+        against _offered for the same reason across turns rather than within
+        one -- see its comment in __init__ for why the noticing pass keeps
+        finding a fact the user has already been asked about.
 
-        A session's final turn never has its candidates offered. They are
-        dropped rather than saved -- rescuing them would buy back exactly the
-        spool file this design does without.
+        A session's final turn is not dropped: close() runs its own noticing
+        pass over the finished conversation and offers the result through here,
+        so the last thing said still gets its chance to be remembered.
+
+        Guarded here rather than at the call sites, which is the only place
+        that guards both. prepare() reaches the GTK layer, so it can fail; in
+        send() an unguarded failure would surface to the user as the "couldn't
+        reach the model" banner, blaming the network for a dialog fault and
+        losing the message they typed.
         """
         found, self._pending = self._pending, []
+        found = [text for text in found if text not in self._offered]
         if not found:
             return
-        self._gate.prepare([("remember", {"text": text}) for text in found])
-        for text in found:
-            # Through _run, not store.add: an approved candidate is an ordinary
-            # remember and belongs in actions.log and the counters like one.
-            self._run("remember", {"text": text})
+        self._offered.update(found)
+        try:
+            self._gate.prepare([("remember", {"text": text}) for text in found])
+            for text in found:
+                # Through _run, not store.add: an approved candidate is an
+                # ordinary remember and belongs in actions.log and the counters
+                # like one.
+                self._run("remember", {"text": text})
+        except Exception:
+            pass
 
-    def close(self) -> None:
+    def close(self, summary: bool = True) -> None:
         """Called once, on window shutdown. Never raises.
+
+        Pass summary=False when a turn is still running. The closing summary
+        would otherwise call prepare() on a second thread, and prepare() opens
+        by clearing the consent ledger -- so the live turn's next decide()
+        would find its verdicts gone and ask the user again for an action they
+        had already approved. Spec section 7 says the summary is skipped
+        entirely in that case, and skipping is what the caller gets here.
+        Skipping, not waiting: a lock would park shutdown behind a consent
+        dialog the user must answer after having asked to quit.
+
+        The usage line is written either way. It describes the session, not
+        the summary, and it is the only record that the session happened.
 
         Order matters: the closing summary's approved remembers go through
         _run and increment _actions, so usage.record must come last or the
@@ -215,11 +251,12 @@ class Session:
         the window has already gone. usage.record swallows its own failures
         separately.
         """
-        try:
-            self._pending = notice.candidates(self._client, self._messages)
-            self._offer_candidates()
-        except Exception:
-            pass
+        if summary:
+            try:
+                self._pending = notice.candidates(self._client, self._messages)
+                self._offer_candidates()
+            except Exception:
+                pass
         usage.record(self._started, self._turns, self._actions, self._declined)
 
     def _run(self, name: str, arguments: dict) -> str:
