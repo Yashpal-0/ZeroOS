@@ -215,9 +215,14 @@ class Session:
         found = [text for text in found if text not in self._offered]
         if not found:
             return
-        self._offered.update(found)
         try:
             self._gate.prepare([("remember", {"text": text}) for text in found])
+            # Marked offered only once the dialog has actually reached the user.
+            # Ahead of prepare(), a GTK fault would both drain the candidate and
+            # record it as asked about, and the noticing pass would keep finding
+            # it every turn only for this filter to drop it -- unofferable for
+            # the rest of the session over a question nobody was ever shown.
+            self._offered.update(found)
             for text in found:
                 # Through _run, not store.add: an approved candidate is an
                 # ordinary remember and belongs in actions.log and the counters

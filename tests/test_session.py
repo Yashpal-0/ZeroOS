@@ -465,12 +465,36 @@ def test_close_never_raises_when_the_summary_fails(home, monkeypatch):
 def test_close_with_nothing_to_summarise_opens_no_dialog(home, monkeypatch):
     monkeypatch.setattr("zeroos.agent.notice.candidates", lambda client, messages: [])
 
-    def ask(rows):
-        raise AssertionError("no dialog when there is nothing to summarise")
-
-    session, _, _ = build_session([FakeMessage(content="Done.")], [], ask=ask)
+    # Recorded rather than raised, for the same reason as the turn-path test
+    # above: close() and _offer_candidates both swallow exceptions, so an ask
+    # that raised would be absorbed and this test would go green against the
+    # regression it names.
+    seen = []
+    session, _, _ = build_session(
+        [FakeMessage(content="Done.")], [],
+        ask=lambda rows: (seen.append(list(rows)), [False] * len(rows))[1],
+    )
     session.send("hi")
     session.close()
+    assert seen == [], "no dialog when there is nothing to summarise"
+
+
+def test_a_dialog_that_never_opened_does_not_burn_the_candidate(home):
+    # The _offered filter exists to stop a declined fact being re-proposed all
+    # session. If a candidate were marked offered before prepare() succeeded, a
+    # GTK fault would silently spend it: the noticing pass keeps finding the
+    # fact, this filter keeps dropping it, and the user is never once asked.
+    session, asked, _ = build_session([FakeMessage(content="Done.")], [])
+
+    def explode(pending):
+        raise RuntimeError("the dialog layer fell over")
+
+    session._gate.prepare = explode
+    session._pending = ["a fact nobody was shown"]
+    session._offer_candidates()
+
+    assert session._offered == set(), "an unasked question is not an asked one"
+    assert asked == []
 
 
 def test_the_loop_is_bounded(home, monkeypatch):
