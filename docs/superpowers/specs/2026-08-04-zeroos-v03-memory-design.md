@@ -220,6 +220,20 @@ spool file this design does not want.
 `actions.log`, and increments the counters. An approved candidate is an ordinary
 `remember` and is logged as one. A denied candidate is logged `declined`.
 
+**A candidate is offered once per session** (added during implementation; the
+sketch above predates it). The pass reads the whole accumulated transcript every
+turn, so without this a fact the user declined would be proposed again on the
+next turn, and the next, until they gave in and ticked it — which is the consent
+model eroding by repetition. `Session` keeps a set of every candidate text it
+has put in front of the user and filters against it. What is recorded is what
+was *offered*, not what was refused: an approved fact is already stored, so not
+re-offering it is equally right. The set is in memory, dies with the `Session`,
+and reaches no file — a fresh session may raise the same fact again, which is
+the deliberate limit. It is not dedupe machinery: nothing consults the store,
+and across sessions a re-approved fact still appends a second row. A candidate
+counts as offered only once `prepare()` has returned; marking it earlier would
+let a dialog fault spend a question nobody was ever shown.
+
 ---
 
 ## 5. Default-Untick
@@ -340,6 +354,17 @@ usage line would undercount the session it is summarising.
 down with it, and there is nothing a user can do about a failed summary at the
 moment the window is already gone. `close()` keeps its never-raises contract;
 the docstring gains the second reason.
+
+**The signature.** `close(summary: bool = True)`. The lifecycle rule below —
+the summary is skipped when the model is mid-turn — needs a seam, and this is
+it: `ChatWindow._on_close` reads its own `_busy` flag on the GTK main thread
+and passes `summary=not self._busy`. Skipped rather than serialised: the
+summary calls `gate.prepare()`, which opens by clearing the consent ledger, so
+running it alongside a live turn would make that turn re-ask for actions the
+user had already approved. A lock would avoid the corruption and buy a worse
+problem — shutdown parked behind a consent dialog the user has to answer after
+having asked to quit. The usage line is written either way; it describes the
+session, not the summary.
 
 ### Lifecycle, stated so it is not discovered at implementation time
 

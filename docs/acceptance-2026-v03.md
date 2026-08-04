@@ -2,7 +2,9 @@
 
 Spec §11 sets seven success criteria for this release. This document records
 the evidence for each, following the shape of
-[the v0.2 acceptance pass](acceptance-2026-v02.md).
+[the v0.2 acceptance pass](acceptance-2026-v02.md). Criterion 8 is not from
+§11 — it covers a behaviour decided after the spec was written, and is
+recorded here so it gets judged rather than assumed.
 
 > **Status: NOT STARTED.** Every criterion below is unconfirmed. Criteria 3,
 > 4, 5, and 7 have tests that pin them, and those tests pass at HEAD today —
@@ -171,3 +173,37 @@ delay the window's disappearance indefinitely — holds under the shipped
 mechanism too, by a different route: `_on_close` returns immediately, the
 summary runs on a worker thread, and the window destroys itself once that
 thread finishes, rather than being hidden beforehand.
+
+## Criterion 8 — A declined proposal is not raised again this session
+
+**NOT STARTED.** Evidence:
+`tests/test_session.py::test_a_declined_candidate_is_not_proposed_again_this_session`,
+which runs three turns with the noticing pass returning the same fact every
+time and the user declining, and asserts the dialog saw it exactly once.
+
+Added after the spec was written, so it is here rather than in spec §11 —
+see the "offered once per session" subsection of spec §4 for the reasoning.
+It exists because the noticing pass reads the whole accumulated transcript
+on every turn: without suppression, a declined fact returns on the next
+turn and the next, and a dialog that keeps asking the same question is how
+consent decays into reflex, which is the exact failure spec §8 names.
+
+This criterion is behavioural, not mechanical, and the tests cannot close
+it: what matters is whether being asked once and then left alone *feels*
+like being listened to. Judge it during the sittings for criteria 1 and 2
+rather than in its own session.
+
+### Protocol
+
+**Setup:** in one session, decline a proposed fact. Keep talking about the
+same subject for several more turns.
+
+**Prediction, written before the sitting:** _to be recorded here_ — does
+the fact stay gone for the rest of the session, including from the closing
+summary?
+
+**Answer:** _to be recorded here_, and separately: does the assistant
+behave as though it heard the refusal, or merely as though it forgot to
+ask? Note also what happens in the *next* session, where the set is gone by
+design and the fact may be raised again — and whether that reads as a fresh
+start or as nagging.
