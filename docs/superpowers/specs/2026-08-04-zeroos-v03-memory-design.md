@@ -312,10 +312,10 @@ to approve, which is the same defect the comment describes. The cap moves to
 
 On window close:
 
-1. Hide the window.
-2. Run one final model turn asking for a few lines worth keeping.
-3. Surface the result in a standalone dialog.
-4. Exit when it is answered **or dismissed**.
+1. Run one final model turn asking for a few lines worth keeping.
+2. Surface the result in a standalone dialog, presented on the still-visible
+   window — see the note below on why hiding the window first does not work.
+3. Exit — destroying the window — when it is answered **or dismissed**.
 
 Dismiss stores nothing. `dialog.py` already routes Esc and the window X to
 `deny` via `set_close_response("deny")`, so a dismissal is a rejection the user
@@ -346,9 +346,22 @@ the docstring gains the second reason.
 - **App killed** — nothing stored. There is no state file and nothing to recover.
 - **Model mid-turn at close** — the summary is skipped entirely.
 - **Nothing worth summarising** — no dialog appears; the app exits.
-- **The dialog never blocks the window from going away.** The window is already
-  hidden before it appears. A dialog that holds the app open on the way out is
-  worse than no summary at all.
+- **The dialog does not hold the window open indefinitely — but not by the
+  route originally planned here.** The original plan was to hide the window
+  before running the closing summary, so a dialog that held the app open on
+  the way out would be impossible by construction. That plan does not work:
+  `dialog.ask_on_main_thread(window, rows)` calls `dialog.present(window)`,
+  and the `window` it receives *is* the chat window — presenting the summary
+  dialog on a window already hidden would parent it on something the user
+  cannot see or answer, and the app would hang on exit waiting for a response
+  nobody could give. The shipped version keeps the window visible until the
+  summary is answered or dismissed, and only then destroys it. The underlying
+  point stands — a closing dialog is not allowed to hang the app — it is just
+  achieved differently: the close handler returns immediately rather than
+  blocking, the summary runs on a worker thread rather than the main thread,
+  and the window destroys itself once that thread finishes, rather than being
+  hidden first. This was found and the plan corrected during implementation;
+  kept as shipped.
 
 ### Known redundancy
 
