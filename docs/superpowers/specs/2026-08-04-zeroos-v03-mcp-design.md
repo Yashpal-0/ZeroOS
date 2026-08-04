@@ -93,6 +93,12 @@ catalog, which is what `test_registry.py`'s three-place rule was written to
 check. Composition happens in `session.py`, where the wire format already
 lives.
 
+`prompt.py` is **not** modified either, and this was checked rather than
+assumed. `_TEXT` names no tool: it says the model's reach is "limited to the
+tools you have been given" (`prompt.py:38-41`) and leaves the enumeration to
+the schemas on the wire. A prompt that had listed the nine builtins by name
+would have gone stale the moment a server mounted. It does not, so it stands.
+
 ---
 
 ## 3. The Config File
@@ -186,8 +192,13 @@ a shell string, so nothing in a config value is interpreted by a shell.
 Requires `--talk-name=org.freedesktop.Flatpak` in the manifest (section 9).
 
 Framing is newline-delimited JSON on the child's stdin and stdout, per the MCP
-stdio transport. The child's stderr is drained to `agent/log.py` and never
-enters a model prompt.
+stdio transport. The child's stderr is drained on its own thread — an undrained
+pipe fills and deadlocks the child — and **discarded** past a ring of the last
+20 lines held in memory, which the pane shows beneath a failed server. It does
+not go to `agent/log.py`: that file answers "what did ZeroOS do" for a
+non-technical user, it rotates on a size budget, and a chatty server would push
+the user's own history out of it. A server's debug output can also contain the
+server's own credentials. It never enters a model prompt.
 
 The process is spawned once at mount and held for the application's life. On
 quit, and on removal from the pane, it is terminated.
@@ -281,8 +292,14 @@ skipped.
 
 ### Mounting
 
-`mount.load()` runs once at startup and, on demand, when the pane changes
-something:
+`mount.load()` runs **on a worker thread, never on the GTK main thread**. A
+dead remote server costs the 120-second call timeout of section 4, and on the
+main thread that is 120 seconds of no window at all. The window presents
+immediately with builtins alone; mounted tools join `self._tools` when the load
+finishes, and the pane shows each server as connecting until it resolves. The
+same rule holds for a pane-triggered reload.
+
+It runs once at startup and, on demand, when the pane changes something:
 
 1. `config.load()`.
 2. For each entry: connect, `initialize`, `tools/list`.
@@ -313,7 +330,8 @@ what is about to be sent.
 
 Arguments are serialised with `json.dumps(arguments, ensure_ascii=False)` and
 run through `describe._for_display`, which caps the row at `memory.MAX_CHARS`
-like every other row.
+and appends `…`. A server's arguments can be an arbitrarily large blob; the cap
+keeps one call from making the dialog unreadable.
 
 ### `run_command` — its own copy
 
@@ -328,6 +346,22 @@ The command appears **verbatim on its own line**, never paraphrased,
 summarised, or shortened to a description of what it appears to do. The dialog
 already wraps and scrolls (`dialog.py:53`), and the row shows the same bytes
 that will reach the shell.
+
+**This row is not capped**, and it is the one row in the application that is
+not. `_for_display` is not applied to it. The MCP cap above exists so a large
+blob cannot swamp the dialog; here the opposite risk governs — a truncated
+command is a command whose tail the user approved without seeing, and the tail
+is where `&& rm -rf ~` goes. The measurement at the 2026-08-04 caps
+(`dialog.py:48-52`) is the evidence this is workable: a 1,012-character row
+renders 1,144 px tall in a 304 px scrolled viewport with **nothing truncated**
+— every character reachable by scrolling. Long commands make the user scroll.
+That is the intended cost.
+
+Newlines inside the command are preserved. `memory.normalise` is **not**
+applied, for the same reason: a command that reads as one line in the dialog
+but runs as three is a row that lies. Control characters are stripped —
+`normalise`'s escape-sequence handling, without its whitespace collapsing —
+so a command cannot repaint the dialog around itself.
 
 This is the single most consequential row in the application. With host
 execution in the manifest, the confirm gate is the only thing between the model
@@ -506,8 +540,11 @@ A fourth group in the existing `recall.py` dialog — `_servers_group()`,
 alongside `_memory_group`, `_history_group`, and `_settings_group`. Not a new
 file and not a new dialog.
 
-Each row shows a server's name, its status (connected with a tool count, or
-failed with the error), and a trash button. A footer row adds one, opening a
+Each row shows a server's name, its status, and a trash button. The status is
+one of three, matching `mount.status()`: connecting, connected with a tool
+count, or failed with the error and the last of the server's stderr. Because
+`mount.load()` runs off the main thread (section 5), a pane opened during
+startup shows connecting, and the row updates in place when the load resolves. A footer row adds one, opening a
 small form: name, and either a command line or a URL.
 
 `use_markup=False` on every row carrying a server-supplied string, for the
@@ -548,8 +585,14 @@ Edited:
 - `tests/test_registry.py` — unchanged in intent. `build()` still returns only
   builtins, now nineteen with `run_command`.
 - `tests/test_describe.py` — the `run_command` row contains the command
-  verbatim on its own line; an MCP row is name plus `json.dumps` of the
-  arguments.
+  verbatim on its own line; a 5,000-character command survives the row intact
+  and a multi-line command keeps its newlines, while a control character in it
+  does not; an MCP row is name plus `json.dumps` of the arguments, capped at
+  `memory.MAX_CHARS`.
+- `tests/test_recall.py` — the servers group lists each configured server with
+  its status; a server name and error string carrying markup render literally
+  (`use_markup=False`); removing a server from the pane rewrites `servers.json`
+  and the redraw survives an unreadable file.
 - `tests/test_session.py` — a mounted tool dispatches through the same path as a
   builtin; a mount that changed mid-session is picked up at the start of the
   next turn and never mid-turn.
