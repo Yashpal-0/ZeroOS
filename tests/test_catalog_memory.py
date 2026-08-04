@@ -174,3 +174,26 @@ def test_neither_tool_raises_on_hostile_arguments():
     for value in hostile:
         assert isinstance(remember(gate, value), str)
         assert isinstance(forget(gate, value), str)
+
+
+def test_a_merge_at_the_cap_frees_room_for_the_merged_fact():
+    # The at-cap invitation stops being an edge case in v0.3: a noticing pass
+    # proposing up to two a turn reaches 150 in ordinary use. Asserting the
+    # message fires is not the same as showing the path it describes works.
+    gate = AllowGate()
+    for n in range(memory.MAX_FACTS):
+        remember(gate, f"fact {n}")
+
+    assert "propose" in remember(gate, "the merged fact").lower()
+    assert len(memory.load()) == memory.MAX_FACTS
+
+    # The model does what the message asked: forget the overlapping ones,
+    # remember the merged one. Every step went through the dialog.
+    for fact in memory.load()[:2]:
+        assert forget(gate, fact["id"]) == "Forgotten."
+
+    assert remember(gate, "the merged fact") == "Remembered: the merged fact"
+    texts = [f["text"] for f in memory.load()]
+    assert "the merged fact" in texts
+    assert "fact 0" not in texts
+    assert len(texts) == memory.MAX_FACTS - 1
