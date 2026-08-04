@@ -40,18 +40,22 @@ drive real sessions against the real model. It cannot judge whether being
 proposed a fact feels like attention. Every criterion that turns on that is
 left half-open on purpose rather than argued into a verdict.
 
-**Suite state at HEAD:** `317 passed, 0 failed` with `tests/test_app.py`
-excluded — that module segfaults while a ZeroOS instance is running, because
-its `register()` returns a *remote* GApplication and `do_activate()` on a
-remote instance crashes inside GTK. Environmental, unrelated to this release,
-and it passes with the app closed (318 total). The v0.2 baseline was 284.
+**Suite state at HEAD:** `318 passed, 0 failed`, measured with the whole
+suite, `tests/test_app.py` included, with ZeroOS closed. The v0.2 baseline
+was 284.
+
+Most of the walk ran with that module excluded (`317 passed`) because it
+segfaults while a ZeroOS instance is running: its `register()` returns a
+*remote* GApplication, and `do_activate()` on a remote instance crashes
+inside GTK. That is environmental and unrelated to this release — closing
+the app is the whole fix — but the 318 above is a run, not 317 plus one.
 
 | # | Criterion | Status | Evidence |
 |---|---|---|---|
 | 1 | Acts on a stored fact instead of asking again | **SCRIPT-CONFIRMED** | fact crossed a session boundary and was acted on unprompted, live |
 | 2 | Proposes an unasked fact in ordinary use | **SCRIPT-CONFIRMED** | proposed verbatim from a passing mention — *after* the defect below was fixed |
 | 3 | No tool-result text in any noticing payload | **CONFIRMED** | `tests/test_notice.py::test_tool_results_never_reach_the_noticing_request`, run alone and mutation-checked |
-| 4 | Fresh install's first request byte-identical to v0.1's | **CONFIRMED** | `tests/test_session.py::test_with_no_memories_there_is_exactly_one_system_message` |
+| 4 | Fresh install's first request carries exactly one system message | **CONFIRMED** | `tests/test_session.py::test_with_no_memories_there_is_exactly_one_system_message` — the v0.1-parity half of this criterion was voided by the persona ruling, see below |
 | 5 | Every memory row starts unticked | **CONFIRMED** | `tests/test_gate.py::test_a_remember_row_is_offered_unticked`, `tests/test_dialog.py::test_a_row_offered_unticked_starts_unticked` |
 | 6 | 150 × 300 stored, listed, and sent without the pane breaking | **CONFIRMED** | store, request, and pane all measured at the cap; pane rendered and read |
 | 7 | Close never delayed by the summary dialog | **CONFIRMED** | `tests/test_window.py::test_close_request_halts_the_close_until_the_summary_finishes` |
@@ -128,6 +132,13 @@ billed for ~1200 — but it does mean the noticing pass now bills roughly
 **1,200 reasoning tokens per turn (~$0.00016)** that the shipped version was
 not paying, because the shipped version was not working. Pinned by
 `tests/test_notice.py::test_the_noticing_request_asks_for_room_to_think`.
+
+The same ruling raised `session.MAX_TOKENS` from 4096 to 65536, and that
+half is not measured here. The main step loop is now free to reason and
+answer up to the ceiling on every one of up to `MAX_STEPS` iterations, so
+generated tokens per turn will rise by an amount this walk did not put a
+number on. Still a ceiling rather than a spend, and 4096 was itself a guess
+— but it belongs in the billing-gate arithmetic beside the 1,200.
 
 The general lesson is worth more than the fix: a function that swallows its
 own failure into an ordinary-looking return value cannot be trusted to tell
@@ -334,15 +345,30 @@ asserts the marker appears nowhere in the request `notice.candidates`
 sends. Spec §4 calls this filter the security boundary of the release; spec
 §9 calls this the single most important test in the section.
 
-## Criterion 4 — Fresh install's first request byte-identical to v0.1's
+## Criterion 4 — Fresh install's first request carries exactly one system message
 
-**CONFIRMED, 2026-08-04.** Run alone; passed. Evidence:
+**The criterion as written no longer holds, because it was retired on
+purpose.** It was drafted as "byte-identical to v0.1's", and the USER RULING
+of 2026-08-04 replaced the system prompt with the JARVIS persona. The v0.1
+bytes are gone by decision, not by drift, so the parity clause is void and
+this section states the property that survived it.
+
+**CONFIRMED, 2026-08-04**, for that surviving property. Run alone; passed.
+Evidence:
 `tests/test_session.py::test_with_no_memories_there_is_exactly_one_system_message`,
 which asserts a fresh session's outgoing request carries exactly one system
-message and that its content is `SYSTEM_PROMPT` unchanged. The
-`MEMORY_PREFACE` sentence added in this release (spec §3) prefixes the
-*second* system message, which does not exist on an empty store, so it
-cannot move these bytes regardless of what it says.
+message and that its content is `prompt.SYSTEM_PROMPT`. Note what that
+assertion is and is not: it compares the request against the current value of
+`SYSTEM_PROMPT`, so it proves the request carries the prompt and nothing
+appended to it — it cannot prove `SYSTEM_PROMPT` itself has not changed. The
+thing that pins the bytes is
+`tests/test_prompt.py::test_sir_variant_is_byte_identical_to_the_pinned_system_prompt`,
+and its pin now holds the JARVIS text.
+
+What still matters here, and what the test does prove: the `MEMORY_PREFACE`
+sentence added in this release (spec §3) prefixes the *second* system
+message, which does not exist on an empty store. Nothing section 3 adds can
+reach a fresh install's first request regardless of what it says.
 
 ## Criterion 5 — Every memory row starts unticked
 

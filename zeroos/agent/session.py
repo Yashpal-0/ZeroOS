@@ -178,8 +178,11 @@ class Session:
         halfway through a turn must be visible to the next model call in that
         same turn, or the assistant appears to forget what it just confirmed.
 
-        Empty means omitted, not sent blank — a fresh install's request is
-        byte-identical to v0.1's. Spec §13.4.
+        Empty means omitted, not sent blank — a fresh install's request
+        carries exactly one system message, and nothing section 3 adds can
+        reach it. Spec §13.4. (§13.4 originally said "byte-identical to
+        v0.1's"; the persona ruling of 2026-08-04 replaced the prompt text,
+        which voids the parity half and leaves this half intact.)
 
         The preface lives in prompt.py and the facts in platform/memory.py;
         joining them is this layer's job, which is what keeps the store free

@@ -270,7 +270,13 @@ def system_messages(request) -> list[dict]:
 
 
 def test_with_no_memories_there_is_exactly_one_system_message(home):
-    """Spec §13.4. A fresh install's request is byte-identical to v0.1's."""
+    """Spec §13.4. A fresh install sends the prompt and nothing appended.
+
+    Not a byte-identity test, despite what §13.4 originally said: it compares
+    against the current SYSTEM_PROMPT, so it cannot see that value change.
+    The bytes are pinned in test_prompt.py. What this catches is section 3
+    leaking into the first request of an empty store.
+    """
     from zeroos.agent.prompt import SYSTEM_PROMPT
 
     session, _, client = build_session([FakeMessage(content="hello")], [])

@@ -146,7 +146,9 @@ def test_the_preface_states_the_boundary_before_the_encouragement():
 
 
 def test_editing_the_preface_cannot_move_the_first_system_message():
-    # Criterion 4: a fresh install's request stays byte-identical to v0.1's.
-    # MEMORY_PREFACE lives in the second system message, which does not exist
-    # when nothing is stored, so this must hold no matter what section 3 adds.
+    # Criterion 4: a fresh install's request carries the prompt and nothing
+    # appended to it. MEMORY_PREFACE lives in the second system message, which
+    # does not exist when nothing is stored, so this must hold no matter what
+    # section 3 adds. (Criterion 4 also said "byte-identical to v0.1's" until
+    # the persona ruling of 2026-08-04 replaced the prompt text.)
     assert prompt.MEMORY_PREFACE not in prompt.SYSTEM_PROMPT
