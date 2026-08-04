@@ -1,5 +1,10 @@
-"""The chat window. Text in, replies out, agent work off the main thread."""
+"""The chat window. Text in, replies out, agent work off the main thread.
 
+A reply arrives in two parts: the sentence JARVIS says, and the part he only
+shows. See split().
+"""
+
+import re
 import threading
 
 import gi
@@ -30,6 +35,46 @@ def _watch_clipboard(clipboard) -> None:
     """Refresh the mirror now, and again every time the clipboard changes."""
     clipboard.read_text_async(None, _on_clipboard_text)
     clipboard.connect("changed", lambda cb: cb.read_text_async(None, _on_clipboard_text))
+
+
+# The point at which a spoken line has stopped being one. Not a setting: a
+# number the user can raise is a number that gets raised until the split stops
+# meaning anything.
+SPOKEN_MAX = 200
+
+# A line of its own holding nothing but three hyphens -- what prompt.py asks
+# for. Indentation is allowed because prompt.py's own example is indented, and
+# a model that copies the example verbatim must not silently lose the split.
+MARKER = re.compile(r"\n[ \t]*---[ \t]*(?:\n|$)")
+
+
+def split(reply: str) -> tuple[str, str]:
+    """The sentence JARVIS says, and the part he only shows.
+
+    Presentation and nothing else. session.py keeps the whole reply, marker
+    and all, in the message log and in history, so the model still sees what
+    it said and the recall pane is unaffected by any of this.
+
+    The first marker is the one that counts; a model that emits several keeps
+    the rest inside the detail, where they read as the rules they look like.
+
+    The length guard is for the turns where the model ignores the format at
+    all. It cuts only at a sentence boundary: with no ". " inside the first
+    SPOKEN_MAX characters nothing moves, because one long sentence spoken
+    whole reads better than one cut mid-thought.
+    """
+    parts = MARKER.split(reply, maxsplit=1)
+    spoken, detail = parts[0], parts[1] if len(parts) > 1 else ""
+    if len(spoken) > SPOKEN_MAX:
+        head, stop, tail = spoken[:SPOKEN_MAX].rpartition(". ")
+        if head:
+            detail = f"{tail}{spoken[SPOKEN_MAX:]}\n\n{detail}"
+            spoken = head + stop.rstrip()
+    spoken, detail = spoken.strip(), detail.strip()
+    # A reply that is nothing but detail is still a reply. Showing it under an
+    # empty line would be the blank window that send() already refuses to
+    # produce, arriving by another route.
+    return (spoken, detail) if spoken else (detail, "")
 
 
 class ChatWindow(Adw.ApplicationWindow):
@@ -135,7 +180,14 @@ class ChatWindow(Adw.ApplicationWindow):
         GLib.idle_add(self._show_reply, reply)
 
     def _show_reply(self, reply: str) -> bool:
-        self._append("assistant", reply)
+        spoken, detail = split(reply)
+        self._append("assistant", spoken)
+        if detail:
+            # Collapsed. The whole point of moving it off the spoken line is
+            # that the user does not have to read it.
+            body = Gtk.Label(label=detail, wrap=True, xalign=0, selectable=True,
+                             margin_start=12, margin_top=6)
+            self._transcript.append(Gtk.Expander(label="details", child=body))
         self._busy = False
         return GLib.SOURCE_REMOVE
 

@@ -186,6 +186,73 @@ def _walk(widget):
     return found
 
 
+def test_a_reply_with_no_marker_is_spoken_whole():
+    assert window.split("Four tax PDFs are filed, Sir.") == (
+        "Four tax PDFs are filed, Sir.", ""
+    )
+
+
+def test_the_marker_moves_everything_after_it_out_of_the_spoken_line():
+    spoken, detail = window.split("Four tax PDFs are filed, Sir.\n---\n2024-return.pdf\nw2.pdf")
+    assert spoken == "Four tax PDFs are filed, Sir."
+    assert detail == "2024-return.pdf\nw2.pdf"
+
+
+def test_an_indented_marker_still_splits():
+    # prompt.py's example is indented, so a model copying it verbatim indents
+    # the marker. Matching only a flush-left one would lose the split on
+    # exactly the replies that followed the instructions most literally.
+    spoken, detail = window.split("Filed, Sir.\n    ---\n    2024-return.pdf")
+    assert (spoken, detail) == ("Filed, Sir.", "2024-return.pdf")
+
+
+def test_a_long_spoken_line_is_cut_back_to_a_sentence():
+    long_line = "I looked at every one of them. " * 12  # well past SPOKEN_MAX
+    spoken, detail = window.split(long_line + "\n---\nthe list")
+    assert len(spoken) <= window.SPOKEN_MAX
+    assert spoken.endswith("."), "the guard must cut at a sentence, not mid-word"
+    assert detail.endswith("the list"), (
+        "the overflow belongs above the detail the model itself moved down, "
+        "not appended after it"
+    )
+    assert "I looked at every one of them." in detail
+
+
+def test_one_long_sentence_is_left_alone():
+    # No ". " within reach. Speaking it whole is worse than nothing being
+    # shown; cutting it mid-thought is worse than both.
+    unbroken = "a" * (window.SPOKEN_MAX + 50)
+    assert window.split(unbroken) == (unbroken, "")
+
+
+def test_a_reply_that_is_only_detail_is_still_spoken():
+    # Otherwise the label is blank, which reads as the crash session.py's
+    # STALLED message exists to avoid.
+    assert window.split("\n---\njust the list") == ("just the list", "")
+
+
+def test_the_prompt_asks_for_the_marker_the_window_splits_on():
+    # The two halves of the design are in different files; nothing else fails
+    # if one of them changes the format and the other does not.
+    from zeroos.agent import prompt
+
+    assert window.MARKER.search(prompt.SYSTEM_PROMPT), (
+        "the prompt's worked example must show a marker line window.py "
+        "recognises -- the model copies the example, not the description"
+    )
+
+
+def test_the_details_are_shown_but_not_spoken(monkeypatch):
+    chat, Gtk = _window(monkeypatch)
+    chat._show_reply("Filed, Sir.\n---\n2024-return.pdf")
+
+    labels = [w.get_text() for w in _walk(chat._transcript) if isinstance(w, Gtk.Label)]
+    expanders = [w for w in _walk(chat._transcript) if isinstance(w, Gtk.Expander)]
+    assert "Filed, Sir." in labels
+    assert len(expanders) == 1, "the detail must be behind a disclosure, not in the reply"
+    assert expanders[0].get_expanded() is False, "the user must not have to read it"
+
+
 def test_text_from_outside_zeroos_reaches_read_clipboard(monkeypatch):
     monkeypatch.setattr(system, "_CLIPBOARD_MIRROR", {})
     window._on_clipboard_text(_FakeClipboard("copied in firefox"), None)
