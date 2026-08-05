@@ -21,7 +21,7 @@ shippable.
 | 1 | **Agent runtime** | The loop: text in, plan, tool calls, response. Conversation state, model config, cost control. | v0.1, extended v0.2 (approved facts, transcript, usage counts) and v0.2.1 (noticing pass, closing summary) |
 | 2 | **Surface** | How the user talks to it: window, onboarding, permission dialog, packaging. | v0.1, extended v0.2 (recall pane) and v0.2.1 (unticked memory rows) |
 | 3 | **Permissions & credentials** | What the agent may do, what it must ask about, where secrets live. | v0.1 (permissions) / later (third-party credentials) |
-| 4 | **Integration layer** | Reach beyond the local machine: third-party services, MCP servers, plugins. | Later |
+| 4 | **Integration layer** | Reach beyond the local machine: third-party services, MCP servers, plugins. | v0.3 |
 | 5 | **Perception** | What it can sense without being told: active window, calendar, notifications, screen text, room audio. Read-only. | Later |
 | 6 | **Autonomy** | Acting without a human present: trust that is earned rather than asked for, unattended work, explaining afterwards. | Later |
 
@@ -76,7 +76,7 @@ transcript that is displayed but never sent, and a usage line of counts only.
 surface, but it does let attacker-controlled file text persist into a
 privileged position, and an automatic `forget` would let injected text erase a
 constraining memory. The recall pane exists so a carelessly-approved fact is
-removable without a terminal. Catalog is now eighteen tools; suite 281 passing.
+removable without a terminal. Catalog is now nineteen tools; suite 281 passing.
 
 **Accepted except for the tester.** Criteria 1–8 are settled with citations.
 The Flatpak now runs on `org.gnome.Platform//50`, and the §6 attack walk has
@@ -125,7 +125,7 @@ mechanical answers that.
 Specified in
 [`docs/superpowers/specs/2026-08-04-zeroos-v021-memory-design.md`](superpowers/specs/2026-08-04-zeroos-v021-memory-design.md).
 
-### v0.3 — MCP servers
+### v0.3 — MCP servers *(shipped)*
 
 Third-party reach without a bespoke integration for each service. MCP is already the
 industry standard for this; building a proprietary tool-registry instead is the most
@@ -143,6 +143,12 @@ That does not survive contact with arbitrary servers. Resolved by making every
 mounted tool confirm-tier, and by adding a `run_command` shell tool alongside —
 specified in
 [`docs/superpowers/specs/2026-08-04-zeroos-v03-mcp-design.md`](superpowers/specs/2026-08-04-zeroos-v03-mcp-design.md).
+
+**Built.** stdio and HTTP transports, off the main thread, failure-tolerant.
+`run_command` joins the catalog at confirm tier. The recall pane gains a servers
+group listing every configured server with live status (connecting / connected / not
+working), a delete button, and a three-field form to add one. Catalog is now nineteen
+tools; suite 421+ passing.
 
 ### v0.4 — Credentials
 

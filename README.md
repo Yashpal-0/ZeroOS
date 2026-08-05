@@ -50,6 +50,17 @@ model sees only the current conversation and the stored facts. A per-session
 usage line records counts and timestamps only: no message text, no fact text, no
 filenames.
 
+## Servers
+
+ZeroOS can reach beyond the local machine through MCP servers. The recall pane
+lists every configured server with its live status — connecting, connected, or
+not working with the server's last error. A delete button removes it, and a
+three-field form (name, command or URL) adds one.
+
+Every tool a server offers is confirm-tier: it asks before it runs. The
+`run_command` shell tool joins the catalog at the same tier. Nothing a mounted
+server offers runs unasked.
+
 ## Documentation
 
 - [v0.1 design spec](docs/superpowers/specs/2026-08-02-zeroos-v01-design.md) — architecture, action catalog, permission model, success criteria
@@ -63,7 +74,7 @@ filenames.
 |---|---|
 | Input | Text only |
 | Reach | Local machine only — no accounts, no server |
-| Actions | 18 curated functions. No shell. No permanent delete. |
+|| Actions | 19 curated functions. No shell. No permanent delete. |
 | Memory | Unlimited facts, 1000 characters each, every one approved by hand; ten sent per reply |
 | Platform | Linux desktop (GNOME-first), shipped as a Flatpak |
 | Built with | Python, GTK4 + libadwaita, `qwen/qwen3.7-flash` via OpenRouter |
