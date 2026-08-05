@@ -29,6 +29,14 @@ from zeroos.platform import paths
 # off the edge of the dialog.
 MAX_CHARS = 1000
 
+# What the model is told, per model call. Storage is unlimited; this is the
+# only limit. A count rather than a character budget because MAX_CHARS already
+# bounds a fact at 1000, so ten facts is at most 10,000 characters (~2,500
+# tokens) whatever they say -- a second budget would bound something already
+# bounded. Also the pin ceiling: pins fill these slots first, so recall.py
+# refuses the eleventh rather than letting injection drop one silently.
+MAX_INJECTED = 10
+
 # Control characters that are not whitespace. Tabs and newlines survive this
 # and are collapsed by the split() below; the rest are deleted, because a
 # fact carrying terminal escapes is a fact meant to be read by something
@@ -151,6 +159,51 @@ def _ranked(facts: list[dict], query: str, limit: int) -> list[dict]:
         # pinned and recent facts. Nothing here reaches the agent loop.
         return []
     return [facts[row[0]] for row in rows]
+
+
+def search(query: str, limit: int = MAX_INJECTED) -> list[dict]:
+    """The facts to put in front of the model this turn, at most `limit`.
+
+    Three tiers, in injection order:
+
+    1. Pinned, in storage order -- the user's explicit choice, which must
+       never depend on matching the query.
+    2. The best BM25 matches for the query.
+    3. The most recent of whatever is left.
+
+    Tier 3 is load-bearing. Measured against the real store on 2026-08-05,
+    "What do you know about me?" matches no fact at all -- none of its words
+    appears in one -- so a pure-retrieval block would be empty for exactly the
+    question memory exists to answer. It also means a store of `limit` or
+    fewer facts comes back whole, with no threshold and no special case.
+
+    Never raises: a ranking failure loses tier 2 and keeps the other two.
+    """
+    facts = load()
+    chosen = [fact for fact in facts if fact.get("pinned")][:limit]
+    taken = {fact["id"] for fact in chosen}
+    rest = [fact for fact in facts if fact["id"] not in taken]
+    for fact in _ranked(rest, query, limit - len(chosen)) + list(reversed(rest)):
+        if len(chosen) >= limit:
+            break
+        if fact["id"] not in taken:
+            chosen.append(fact)
+            taken.add(fact["id"])
+    return chosen
+
+
+def set_pinned(fact_id: str, pinned: bool) -> bool:
+    """Pin or unpin one fact. False if the id is unknown or the write failed.
+
+    Only surface/recall.py calls this. Pinning is a consent decision, like
+    deletion, so no catalog tool exposes it and the model cannot reach it.
+    """
+    facts = load()
+    for fact in facts:
+        if fact["id"] == fact_id:
+            fact["pinned"] = pinned
+            return _write(facts)
+    return False
 
 
 def _write(facts: list[dict]) -> bool:

@@ -193,3 +193,77 @@ def test_a_sqlite_failure_ranks_nothing_instead_of_raising(monkeypatch):
     monkeypatch.setattr(memory.sqlite3, "connect", explode)
     facts = [{"id": "a", "text": "Yash keeps tax PDFs in Documents"}]
     assert memory._ranked(facts, "tax", 10) == []
+
+
+def test_a_small_store_is_returned_whole_whatever_the_query():
+    # The v0.2.1 guarantee, kept: below the limit, nothing is dropped. This is
+    # what recency backfill buys -- there is no threshold constant.
+    for n in range(4):
+        memory.add(f"Yash owns thing number {n}")
+    assert len(memory.search("something entirely unrelated")) == 4
+
+
+def test_a_query_matching_nothing_still_returns_the_limit():
+    # Measured on the real store: "What do you know about me?" matches no fact
+    # under BM25. Pure retrieval would send an empty block for the one question
+    # memory exists to answer.
+    for n in range(30):
+        memory.add(f"Yash owns thing number {n}")
+    found = memory.search("What do you know about me?")
+    assert len(found) == memory.MAX_INJECTED
+
+
+def test_the_backfill_takes_the_most_recent():
+    for n in range(30):
+        memory.add(f"Yash owns thing number {n}")
+    found = memory.search("What do you know about me?")
+    assert found[0]["text"] == "Yash owns thing number 29"
+
+
+def test_a_matching_fact_beats_a_more_recent_one():
+    memory.add("Yash keeps tax PDFs in Documents")
+    for n in range(30):
+        memory.add(f"Yash owns thing number {n}")
+    found = memory.search("where are my tax pdfs")
+    assert found[0]["text"] == "Yash keeps tax PDFs in Documents"
+
+
+def test_never_more_than_the_limit_comes_back():
+    for n in range(500):
+        memory.add(f"Yash owns document number {n}")
+    assert len(memory.search("document")) == memory.MAX_INJECTED
+
+
+def test_a_pinned_fact_comes_back_for_a_query_it_does_not_match():
+    pinned = memory.add("Yash prefers to be called Yash, not Yashpal")
+    memory.set_pinned(pinned, True)
+    for n in range(30):
+        memory.add(f"Yash owns thing number {n}")
+    found = memory.search("where are my tax pdfs")
+    assert found[0]["id"] == pinned
+
+
+def test_a_pinned_fact_is_never_listed_twice():
+    pinned = memory.add("Yash keeps tax PDFs in Documents")
+    memory.set_pinned(pinned, True)
+    memory.add("Yash prefers dark mode")
+    found = memory.search("where are my tax pdfs")
+    assert [f["id"] for f in found].count(pinned) == 1
+
+
+def test_a_fact_written_before_pinning_existed_is_still_selectable():
+    # No migration: a jsonl line with no "pinned" key must behave as unpinned.
+    memory.path().parent.mkdir(parents=True, exist_ok=True)
+    memory.path().write_text('{"id": "old", "text": "Yash keeps tax PDFs in Documents"}\n')
+    assert [f["id"] for f in memory.search("tax pdfs")] == ["old"]
+
+
+def test_set_pinned_on_an_unknown_id_returns_false():
+    assert memory.set_pinned("nope", True) is False
+
+
+def test_unpinning_puts_a_fact_back_in_the_ranked_pool():
+    fact_id = memory.add("Yash prefers dark mode")
+    memory.set_pinned(fact_id, True)
+    memory.set_pinned(fact_id, False)
+    assert memory.load()[0].get("pinned") is False
