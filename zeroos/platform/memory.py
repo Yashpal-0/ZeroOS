@@ -15,7 +15,9 @@ is what lets policy/describe.py read facts without importing the agent.
 
 import json
 import os
+import re
 import secrets
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -99,6 +101,56 @@ def text_of(fact_id: str) -> str | None:
         if fact["id"] == fact_id:
             return fact["text"]
     return None
+
+
+_WORD = re.compile(r"\w+")
+
+
+def _match_query(text: str) -> str:
+    """An FTS5 MATCH expression built from arbitrary user text.
+
+    Word runs only, each one quoted. FTS5 operators (AND, OR, NOT, NEAR, *,
+    ^, ") cannot survive that: a word like AND comes back inside quotes, where
+    FTS5 reads it as a literal rather than syntax. The user's message is data
+    here, exactly as a file's contents are data everywhere else in this app.
+    """
+    return " OR ".join(f'"{word}"' for word in _WORD.findall(text))
+
+
+def _ranked(facts: list[dict], query: str, limit: int) -> list[dict]:
+    """The best `limit` matches for the query, best first. Never raises.
+
+    The index is built here and dropped when this returns. At a few thousand
+    rows that is milliseconds, and it buys the property that matters: search
+    is a pure function of the store, so a fact approved mid-turn is findable
+    on the next model call with nothing to invalidate.
+
+    bm25() returns a negative score and a better match is more negative, so
+    plain ascending ORDER BY is best-first.
+
+    ponytail: rebuilt per search. A session-scoped index with explicit
+    invalidation only if profiling ever asks for it.
+    """
+    match = _match_query(query)
+    if not match or limit <= 0:
+        return []
+    try:
+        db = sqlite3.connect(":memory:")
+        db.execute("CREATE VIRTUAL TABLE facts USING fts5(text)")
+        db.executemany(
+            "INSERT INTO facts(rowid, text) VALUES (?, ?)",
+            [(n, fact["text"]) for n, fact in enumerate(facts)],
+        )
+        rows = db.execute(
+            "SELECT rowid FROM facts WHERE facts MATCH ? ORDER BY bm25(facts) LIMIT ?",
+            (match, limit),
+        ).fetchall()
+        db.close()
+    except sqlite3.Error:
+        # Every caller degrades rather than fails: selection carries on with
+        # pinned and recent facts. Nothing here reaches the agent loop.
+        return []
+    return [facts[row[0]] for row in rows]
 
 
 def _write(facts: list[dict]) -> bool:

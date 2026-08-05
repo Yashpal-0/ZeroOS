@@ -156,3 +156,40 @@ def test_temp_file_cleaned_up_on_write_failure(tmp_path, monkeypatch):
         data_home.chmod(0o755)  # restore for cleanup
         temp_files = [p for p in data_home.iterdir() if p.name.endswith(".tmp")]
         assert len(temp_files) == 0, f"Temp files left behind: {temp_files}"
+
+
+def test_a_matching_fact_ranks_ahead_of_a_non_matching_one():
+    facts = [
+        {"id": "a", "text": "Yash prefers dark mode"},
+        {"id": "b", "text": "Yash keeps tax PDFs in Documents"},
+    ]
+    ranked = memory._ranked(facts, "where are my tax pdfs", 10)
+    assert [f["id"] for f in ranked] == ["b"]
+
+
+def test_ranking_respects_its_limit():
+    facts = [{"id": str(n), "text": f"Yash owns document number {n}"} for n in range(50)]
+    assert len(memory._ranked(facts, "document", 10)) == 10
+
+
+def test_fts_operators_in_a_user_message_are_data_not_syntax():
+    # The query is built from the user's message. An unbalanced quote or a bare
+    # NEAR would be a syntax error the agent loop would see as a crash.
+    facts = [{"id": "a", "text": "Yash keeps tax PDFs in Documents"}]
+    assert memory._ranked(facts, 'tax AND NOT "unbalanced NEAR( *', 10)
+
+
+def test_a_query_with_no_words_ranks_nothing():
+    facts = [{"id": "a", "text": "Yash keeps tax PDFs in Documents"}]
+    assert memory._ranked(facts, "?! ... ***", 10) == []
+
+
+def test_a_sqlite_failure_ranks_nothing_instead_of_raising(monkeypatch):
+    # A degraded memory feature must not take a turn down. Task 5's selection
+    # continues past this with pins and recency.
+    def explode(*args, **kwargs):
+        raise memory.sqlite3.OperationalError("no such module: fts5")
+
+    monkeypatch.setattr(memory.sqlite3, "connect", explode)
+    facts = [{"id": "a", "text": "Yash keeps tax PDFs in Documents"}]
+    assert memory._ranked(facts, "tax", 10) == []
