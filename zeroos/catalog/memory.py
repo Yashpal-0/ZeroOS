@@ -1,7 +1,7 @@
 """remember and forget. Spec §4.
 
-Both are confirm-tier and must stay that way. The caps are enforced here
-rather than in the store because this is the layer with a string to hand
+Both are confirm-tier and must stay that way. The character cap is enforced
+here rather than in the store because this is the layer with a string to hand
 back to the model.
 
 store.add and store.remove never raise — a failed write comes back as ""
@@ -23,7 +23,8 @@ def bind(gate):
         available in future conversations.
 
         Args:
-            text: The fact, in one sentence, in the user's own words.
+            text: The fact, in one sentence, in the third person -- "Yash keeps
+                tax PDFs in Documents", not "I keep tax PDFs in Documents".
 
         Use this only when the user asks you to remember something, or states
         a lasting preference. Do not use it to store the contents of files, or
@@ -45,14 +46,6 @@ def bind(gate):
             return "There was nothing there to remember."
         if len(clean) > store.MAX_CHARS:
             return f"That is too long to remember — keep it under {store.MAX_CHARS} characters."
-        if len(store.load()) >= store.MAX_FACTS:
-            return (
-                f"Already remembering the most I can — {store.MAX_FACTS} things. "
-                "Look through them, propose which ones overlap and could become "
-                "one shorter fact, then forget the old ones and remember the "
-                "merged one. The user will see and approve each step before "
-                "anything changes."
-            )
         if not store.add(clean):
             return _SAVE_FAILED
         return f"Remembered: {clean}"
@@ -65,8 +58,10 @@ def bind(gate):
             fact_id: The id shown in square brackets beside the fact in the
                 list of remembered things.
 
-        Use this when the user asks to forget something specific, or as part
-        of a consolidation after remember() reports the store is full.
+        Use this when the user asks to forget something specific, or when they
+        want two overlapping facts replaced by one: remember the merged fact
+        and forget the old ones in the same reply, and the user approves the
+        whole batch in one dialog.
         """
         verdict, message = gate.decide("forget", {"fact_id": fact_id})
         if verdict is not Verdict.ALLOW:

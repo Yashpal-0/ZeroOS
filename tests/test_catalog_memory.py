@@ -98,21 +98,15 @@ def test_a_fact_exactly_at_the_cap_is_stored():
     assert len(memory.load()) == 1
 
 
-def test_the_fact_past_the_cap_is_refused_and_invites_a_consolidation():
-    # Amendment 2 overrides the brief's flat refusal: at the cap, remember
-    # must invite the model to propose a merge rather than just say no.
+def test_storage_has_no_count_limit():
+    # The old cap existed because everything stored was injected. Retrieval
+    # bounds injection instead (memory.MAX_INJECTED), so a storage cap would
+    # only refuse facts the user wanted kept.
     gate = AllowGate()
-    for n in range(memory.MAX_FACTS):
-        remember(gate, f"fact {n}")
-    result = remember(gate, "one too many")
-    facts = memory.load()
-    assert len(facts) == memory.MAX_FACTS
-    assert facts[0]["text"] == "fact 0"
-    assert str(memory.MAX_FACTS) in result
-    assert "forget" in result.lower()
-    assert "remember" in result.lower()
-    assert "propose" in result.lower()
-    assert "approve" in result.lower()
+    for n in range(1000):
+        remember(gate, f"Yash owns thing number {n}")
+    assert len(memory.load()) == 1000
+    assert not hasattr(memory, "MAX_FACTS")
 
 
 def test_forget_removes_the_fact():
@@ -176,24 +170,3 @@ def test_neither_tool_raises_on_hostile_arguments():
         assert isinstance(forget(gate, value), str)
 
 
-def test_a_merge_at_the_cap_frees_room_for_the_merged_fact():
-    # The at-cap invitation stops being an edge case in v0.2.1: a noticing pass
-    # proposing up to two a turn reaches 150 in ordinary use. Asserting the
-    # message fires is not the same as showing the path it describes works.
-    gate = AllowGate()
-    for n in range(memory.MAX_FACTS):
-        remember(gate, f"fact {n}")
-
-    assert "propose" in remember(gate, "the merged fact").lower()
-    assert len(memory.load()) == memory.MAX_FACTS
-
-    # The model does what the message asked: forget the overlapping ones,
-    # remember the merged one. Every step went through the dialog.
-    for fact in memory.load()[:2]:
-        assert forget(gate, fact["id"]) == "Forgotten."
-
-    assert remember(gate, "the merged fact") == "Remembered: the merged fact"
-    texts = [f["text"] for f in memory.load()]
-    assert "the merged fact" in texts
-    assert "fact 0" not in texts
-    assert len(texts) == memory.MAX_FACTS - 1

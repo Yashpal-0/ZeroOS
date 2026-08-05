@@ -21,19 +21,10 @@ from pathlib import Path
 
 from zeroos.platform import paths
 
-# USER RULING, 2026-08-04: the store's ceiling is a share of the context
-# window rather than a number picked for comfort, and the share is 250,000
-# tokens. These two are the whole of that budget, so they are set from a
-# measurement rather than an estimate: 950 x 1000 renders a 961,707-character
-# block, and the real model reported 220,354 prompt tokens for it. Facts
-# written in varied prose tokenize a little worse than the probe's repeated
-# text (3.95 chars/token against 4.36), which puts the true worst case near
-# 243,000 -- still inside the budget, which is why the numbers are 950 and
-# 1000 rather than the 975 the arithmetic alone would allow.
-#
-# Raising these does not raise what a turn normally costs: the block is
-# whatever is stored, and a store with nine facts in it sends nine.
-MAX_FACTS = 950
+# One fact, not the count. This is what makes "ten injected facts" a bounded
+# number of characters, and what keeps a fact readable in the approval dialog
+# row the user ticks -- the v0.2 acceptance walk found an oversized row running
+# off the edge of the dialog.
 MAX_CHARS = 1000
 
 # Control characters that are not whitespace. Tabs and newlines survive this
