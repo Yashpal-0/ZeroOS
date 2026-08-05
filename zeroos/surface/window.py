@@ -84,6 +84,9 @@ class ChatWindow(Adw.ApplicationWindow):
         self._session = Session(api_key=api_key, ask=lambda rows: ask_on_main_thread(self, rows))
         self._busy = False
         self._closing = False
+        # The Gtk.Label tokens are streaming into, or None when the next token
+        # starts a new bubble. Reset on "done" and before each "tools" batch.
+        self._streaming_label = None
 
         _watch_clipboard(Gdk.Display.get_default().get_clipboard())
 
@@ -173,13 +176,43 @@ class ChatWindow(Adw.ApplicationWindow):
     def _run_turn(self, text: str) -> None:
         """Runs on a worker thread. All UI updates marshal back via idle_add."""
         try:
-            reply = self._session.send(text)
+            self._session.send(text, on_event=self._on_event)
         except Exception as failure:  # network, rate limit, bad key
             GLib.idle_add(self._show_failure, str(failure), text)
-            return
-        GLib.idle_add(self._show_reply, reply)
+
+    def _on_event(self, kind: str, payload) -> None:
+        """Marshal a streaming event to the main thread. Fires from the worker."""
+        GLib.idle_add(self._handle_event, kind, payload)
+
+    def _handle_event(self, kind: str, payload) -> bool:
+        if kind == "token":
+            self._on_token(payload)
+        elif kind == "tools":
+            self._on_tools(payload)
+        elif kind == "done":
+            self._show_reply(payload)
+        return GLib.SOURCE_REMOVE
+
+    def _on_token(self, delta: str) -> None:
+        if self._streaming_label is None:
+            self._streaming_label = Gtk.Label(wrap=True, xalign=0, selectable=True)
+            self._transcript.append(self._streaming_label)
+        self._streaming_label.set_label(
+            (self._streaming_label.get_label() or "") + delta
+        )
+
+    def _on_tools(self, descriptions: list[str]) -> None:
+        # ponytail: per-token set_label is O(n) per token, so very long replies
+        # are O(n²) in the label length. Batch with a ~50ms timer if a tester
+        # notices stutter. Not worth pre-building.
+        for sentence in descriptions:
+            row = Gtk.Label(label=sentence, wrap=True, xalign=0, selectable=True,
+                            opacity=0.6, margin_start=12, margin_top=2)
+            self._transcript.append(row)
+        self._streaming_label = None  # next tokens start a new bubble
 
     def _show_reply(self, reply: str) -> bool:
+        self._streaming_label = None  # finalize: the streaming bubble is done
         spoken, detail = split(reply)
         self._append("assistant", spoken)
         if detail:
