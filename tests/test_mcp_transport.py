@@ -3,6 +3,8 @@ or opens a real connection."""
 
 import json
 import queue
+import threading
+import time
 
 import pytest
 
@@ -147,7 +149,13 @@ def test_stderr_is_drained_and_only_the_last_twenty_lines_are_kept(child):
     for n in range(50):
         child.stderr._lines.put(f"line {n}\n")
     child.stdout.feed({"jsonrpc": "2.0", "id": 1, "result": {}})
-    link.send("tools/list", {})  # gives the drain thread a moment to run
+    link.send("tools/list", {})
+    # The drain thread's scheduling isn't guaranteed by the send() round trip
+    # alone, so poll for up to a second rather than asserting immediately.
+    for _ in range(100):
+        if len(link.stderr_tail()) == 20:
+            break
+        time.sleep(0.01)
     tail = link.stderr_tail()
     assert len(tail) <= transport.STDERR_LINES
     assert tail[-1] == "line 49"
@@ -167,3 +175,47 @@ def test_close_terminates_the_child_and_never_raises(child):
     link.close()
     assert child.terminated is True
     link.close()  # twice is fine
+
+
+def test_a_non_object_frame_is_skipped_rather_than_crashing(child):
+    link = transport.StdioTransport(["server"])
+    child.stdout.feed([1, 2, 3])  # valid JSON, not a JSON-RPC frame
+    child.stdout.feed({"jsonrpc": "2.0", "id": 1, "result": {"ok": True}})
+    assert link.send("tools/list", {}) == {"ok": True}
+
+
+def test_a_literal_null_line_does_not_fake_server_death(child):
+    link = transport.StdioTransport(["server"])
+    child.stdout.feed(None)  # json.loads("null") is None, same as the EOF sentinel
+    child.stdout.feed({"jsonrpc": "2.0", "id": 1, "result": {"ok": True}})
+    assert link.send("tools/list", {}) == {"ok": True}
+
+
+def test_a_second_send_after_the_child_dies_reports_promptly(child, monkeypatch):
+    monkeypatch.setattr(transport, "CALL_TIMEOUT", 5)
+    link = transport.StdioTransport(["server"])
+    child.stdout.close()  # EOF
+    with pytest.raises(transport.TransportError):
+        link.send("tools/list", {})
+    start = time.monotonic()
+    with pytest.raises(transport.TransportError) as caught:
+        link.send("tools/list", {})
+    assert time.monotonic() - start < 1  # not the full 5s CALL_TIMEOUT
+    assert "stopped running" in str(caught.value)
+
+
+def test_unmatched_notifications_do_not_extend_the_deadline(child, monkeypatch):
+    monkeypatch.setattr(transport, "CALL_TIMEOUT", 0.5)
+    link = transport.StdioTransport(["server"])
+
+    def drip():
+        for _ in range(6):
+            time.sleep(0.1)
+            child.stdout.feed({"jsonrpc": "2.0", "method": "notifications/progress", "params": {}})
+
+    threading.Thread(target=drip, daemon=True).start()
+    start = time.monotonic()
+    with pytest.raises(transport.TransportError) as caught:
+        link.send("tools/list", {})
+    assert time.monotonic() - start < 1  # bounded by CALL_TIMEOUT, not 0.6s of chatter
+    assert "too long" in str(caught.value)

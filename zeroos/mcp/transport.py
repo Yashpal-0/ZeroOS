@@ -9,6 +9,7 @@ import json
 import queue
 import subprocess
 import threading
+import time
 
 CALL_TIMEOUT = 120
 STDERR_LINES = 20
@@ -75,9 +76,14 @@ class StdioTransport:
                 self._inbox.put(None)  # EOF: the child is gone
                 return
             try:
-                self._inbox.put(json.loads(line))
+                message = json.loads(line)
             except ValueError:
                 continue  # a server that logs to stdout is noisy, not fatal
+            if isinstance(message, dict):
+                # A bare list/string/number/null parses fine but is not a
+                # JSON-RPC frame -- .get("id") on it would raise, and a literal
+                # null would be indistinguishable from the EOF sentinel below.
+                self._inbox.put(message)
 
     def _read_stderr(self) -> None:
         while True:
@@ -114,13 +120,21 @@ class StdioTransport:
             raise TransportError(f"The server stopped listening: {error}") from error
 
     def _await(self, request_id: int) -> dict:
-        """The reply with this id. Anything else on the wire is discarded."""
+        """The reply with this id. Anything else on the wire is discarded.
+
+        CALL_TIMEOUT bounds the whole wait, not each queue.get -- a server
+        that keeps sending id-less notifications (tools/call progress is
+        legitimate MCP traffic) must not be able to reset the clock and
+        block forever.
+        """
+        deadline = time.monotonic() + CALL_TIMEOUT
         while True:
             try:
-                message = self._inbox.get(timeout=CALL_TIMEOUT)
+                message = self._inbox.get(timeout=max(0, deadline - time.monotonic()))
             except queue.Empty:
                 raise TransportError("The server took too long to answer.") from None
             if message is None:
+                self._inbox.put(None)  # every later caller must see EOF too
                 raise TransportError("The server stopped running.")
             if message.get("id") == request_id:
                 return message
