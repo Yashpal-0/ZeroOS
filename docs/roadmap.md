@@ -125,6 +125,19 @@ mechanical answers that.
 Specified in
 [`docs/superpowers/specs/2026-08-04-zeroos-v021-memory-design.md`](superpowers/specs/2026-08-04-zeroos-v021-memory-design.md).
 
+### v0.2.2 — memory that scales, and behaves
+
+**Built.** Facts are retrieved rather than dumped: an in-memory SQLite FTS5 index,
+built per search from the same `memory.jsonl`, ranks facts by BM25 against what the
+user just typed. Ten reach the model per call — pinned first, then matches, then the
+most recent, so a question that matches nothing still gets an answer. Storage lost its
+count cap entirely; the only limit left is on what is sent. The noticing pass now reads
+one turn instead of the accumulated transcript, and the memory block ends by restating
+the reply format, which it used to bury by arriving after it.
+
+**Why a point release.** No new subsystem, no new action surface, no new dependency —
+`sqlite3` ships with Python. The two catalog tools are the same two v0.2 shipped.
+
 ### v0.3 — MCP servers *(shipped)*
 
 Third-party reach without a bespoke integration for each service. MCP is already the
@@ -314,9 +327,11 @@ would grow the prompt every turn. It does not — a capped list of approved fact
 out as a second system message, and the transcript is never sent at all. Growth is
 bounded by the cap rather than by session length, and `usage.log` records the
 per-session counts to check it against. v0.2.1 raised that cap from 50 × 200 to
-950 × 1000 characters, which moves the ceiling and does not remove it; it also added
-one extra model call per turn for the noticing pass, which is a real cost increase
-this estimate does not yet include.
+950 × 1000 characters, which moved the ceiling
+without removing it; v0.2.2 removed it, by bounding what is *sent* (ten facts) rather
+than what is *kept*. Prompt size no longer grows with the store at all. The noticing
+pass's extra model call per turn remains a real cost this estimate does not include,
+though v0.2.2 made it flat rather than growing with session length.
 
 **The deeper problem is that the whole estimate assumes a human typing.** A hundred
 turns a day is a rate limit imposed by hands. From v0.6 onward the agent runs without
