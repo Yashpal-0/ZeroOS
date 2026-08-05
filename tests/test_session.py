@@ -30,6 +30,39 @@ class FakeResponse:
         self.choices = [type("Choice", (), {"message": message})()]
 
 
+# --- Streaming fakes (v0.3.1) ---
+# A chunk is the per-delta unit the streaming API yields. A tool call arrives
+# fragmented across chunks: id, name, and arguments in separate deltas keyed
+# by index. FakeStreamResponse replays a list of chunks when iterated.
+
+class FakeDelta:
+    def __init__(self, content=None, tool_calls=None):
+        self.content = content
+        self.tool_calls = tool_calls
+
+
+class FakeChunkToolCall:
+    def __init__(self, index, id=None, name=None, arguments=None):
+        self.index = index
+        self.id = id
+        # tc.function is a FakeFunction (name, arguments) — same shape as the
+        # real ChoiceDeltaToolCall, which puts name/arguments on .function.
+        self.function = FakeFunction(name or "", arguments or "")
+
+
+class FakeChunk:
+    def __init__(self, delta):
+        self.choices = [type("Choice", (), {"delta": delta})()]
+
+
+class FakeStreamResponse:
+    def __init__(self, chunks):
+        self._chunks = list(chunks)
+
+    def __iter__(self):
+        return iter(self._chunks)
+
+
 class FakeClient:
     """Replays canned responses and records every request it was sent."""
 
@@ -43,7 +76,23 @@ class FakeClient:
 
     def create(self, **kwargs):
         self.requests.append(kwargs)
-        return FakeResponse(self._responses.pop(0))
+        response = self._responses.pop(0)
+        if kwargs.get("stream"):
+            # Callers pass a FakeStreamResponse for streaming, or a legacy
+            # FakeMessage which we wrap in a single-chunk stream so the
+            # existing non-streaming tests work unchanged under stream=True.
+            if isinstance(response, FakeStreamResponse):
+                return response
+            tool_calls = [
+                FakeChunkToolCall(
+                    index=i, id=c.id, name=c.function.name, arguments=c.function.arguments,
+                )
+                for i, c in enumerate(response.tool_calls or [])
+            ]
+            return FakeStreamResponse([FakeChunk(FakeDelta(
+                content=response.content, tool_calls=tool_calls or None,
+            ))])
+        return FakeResponse(response)
 
 
 def tool_call(id_, name, **arguments):
