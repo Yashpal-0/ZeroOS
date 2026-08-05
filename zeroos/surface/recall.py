@@ -28,6 +28,14 @@ def forget(fact_id: str) -> None:
     memory.remove(fact_id)
 
 
+def set_pinned(fact_id: str, pinned: bool) -> None:
+    memory.set_pinned(fact_id, pinned)
+
+
+def _pinned_count() -> int:
+    return len([fact for fact in memory.load() if fact.get("pinned")])
+
+
 def forget_everything() -> None:
     for fact in memory.load():
         memory.remove(fact["id"])
@@ -67,7 +75,12 @@ def _redraw(dialog) -> None:
 def _memory_group(dialog) -> Adw.PreferencesGroup:
     group = Adw.PreferencesGroup(
         title="Remembered",
-        description="Things you asked ZeroOS to remember. It is told these every time you talk to it.",
+        description=(
+            "Things you asked ZeroOS to remember. It is told the "
+            f"{memory.MAX_INJECTED} most relevant of these each time it "
+            "answers — pinned ones always, so every pin is one less slot for "
+            "the rest."
+        ),
     )
     facts = memory.load()
     if not facts:
@@ -81,6 +94,13 @@ def _memory_group(dialog) -> Adw.PreferencesGroup:
             title=fact["text"], subtitle=fact.get("created", ""), use_markup=False
         )
         row.set_property("title-lines", 0)
+        switch = Gtk.Switch(
+            active=bool(fact.get("pinned")),
+            valign=Gtk.Align.CENTER,
+            tooltip_text="Always tell ZeroOS this",
+        )
+        switch.connect("state-set", lambda _s, state, i=fact["id"]: _pin_row(dialog, i, state))
+        row.add_suffix(switch)
         button = Gtk.Button(icon_name="user-trash-symbolic", valign=Gtk.Align.CENTER)
         button.connect("clicked", lambda _b, i=fact["id"]: _forget_row(dialog, i))
         row.add_suffix(button)
@@ -138,6 +158,33 @@ def _forget_row(dialog, fact_id: str) -> None:
     actions below, which are not recoverable that way."""
     forget(fact_id)
     _redraw(dialog)
+
+
+def _pin_row(dialog, fact_id: str, state: bool) -> bool:
+    """Pin or unpin one fact. True blocks the switch, which is the refusal.
+
+    Pins fill the injection slots first, so an eleventh pin would push one of
+    the ten out at injection time -- the user's explicit choice discarded
+    without a word. Refusing here is the only place that failure can be made
+    visible. Unpinning is never refused.
+    """
+    if state and _pinned_count() >= memory.MAX_INJECTED:
+        _pin_limit_reached(dialog)
+        return True
+    set_pinned(fact_id, state)
+    return False
+
+
+def _pin_limit_reached(dialog) -> None:
+    alert = Adw.AlertDialog(
+        heading=f"{memory.MAX_INJECTED} facts are already pinned",
+        body=(
+            f"ZeroOS is told {memory.MAX_INJECTED} facts each time it answers, "
+            "and pinned ones fill those first. Unpin something to pin this."
+        ),
+    )
+    alert.add_response("ok", "OK")
+    alert.present(dialog)
 
 
 def _danger_row(label: str, activate) -> Adw.ActionRow:

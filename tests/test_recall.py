@@ -215,3 +215,63 @@ def test_picking_a_form_of_address_in_the_combo_persists_it():
     combo.set_selected(settings.ADDRESSES.index("none"))
 
     assert settings.address() == "none"
+
+
+def switch_for(dialog, title):
+    return widgets(row_titled(dialog, title), Gtk.Switch)[0]
+
+
+def test_each_fact_row_has_a_pin_switch():
+    memory.add("Yash keeps tax PDFs in Documents")
+    dialog = recall.build(None)
+    shown(dialog)
+    assert switch_for(dialog, "Yash keeps tax PDFs in Documents").get_active() is False
+
+
+def test_a_pinned_fact_shows_its_switch_on():
+    fact_id = memory.add("Yash keeps tax PDFs in Documents")
+    memory.set_pinned(fact_id, True)
+    dialog = recall.build(None)
+    shown(dialog)
+    assert switch_for(dialog, "Yash keeps tax PDFs in Documents").get_active() is True
+
+
+def test_flipping_the_switch_pins_the_fact():
+    fact_id = memory.add("Yash keeps tax PDFs in Documents")
+    dialog = recall.build(None)
+    shown(dialog)
+    switch_for(dialog, "Yash keeps tax PDFs in Documents").set_active(True)
+    assert memory.load()[0]["pinned"] is True
+    assert memory.text_of(fact_id) == "Yash keeps tax PDFs in Documents"
+
+
+def test_the_eleventh_pin_is_refused_rather_than_dropped_at_injection():
+    # Pins fill the ten injection slots first. Allowing an eleventh would
+    # discard one of the user's explicit choices without telling them.
+    for n in range(memory.MAX_INJECTED):
+        memory.set_pinned(memory.add(f"Yash owns thing number {n}"), True)
+    extra = memory.add("Yash keeps tax PDFs in Documents")
+    dialog = recall.build(None)
+    shown(dialog)
+
+    assert recall._pin_row(dialog, extra, True) is True
+    assert memory.text_of(extra) == "Yash keeps tax PDFs in Documents"
+    assert len([f for f in memory.load() if f.get("pinned")]) == memory.MAX_INJECTED
+
+
+def test_unpinning_is_never_refused():
+    ids = [memory.add(f"Yash owns thing number {n}") for n in range(memory.MAX_INJECTED)]
+    for fact_id in ids:
+        memory.set_pinned(fact_id, True)
+    dialog = recall.build(None)
+    shown(dialog)
+    assert recall._pin_row(dialog, ids[0], False) is False
+    assert len([f for f in memory.load() if f.get("pinned")]) == memory.MAX_INJECTED - 1
+
+
+def test_the_pane_no_longer_claims_every_fact_is_sent():
+    memory.add("Yash keeps tax PDFs in Documents")
+    dialog = recall.build(None)
+    text = " ".join(shown(dialog))
+    assert "every time you talk to it" not in text
+    assert str(memory.MAX_INJECTED) in text
