@@ -18,6 +18,7 @@ from zeroos.agent import history, log, notice, usage
 from zeroos.agent.prompt import MEMORY_PREFACE, PROMPTS
 from zeroos.catalog.registry import build
 from zeroos.platform import memory, settings
+from zeroos.policy.describe import describe_batch
 from zeroos.policy.gate import DENIED_MESSAGE, Gate
 from zeroos.policy.sandbox import REFUSAL_MESSAGE, ROOT_REFUSAL_MESSAGE
 from zeroos.policy.tiers import tier_of
@@ -120,15 +121,22 @@ class Session:
         # one may raise the same fact again, and nothing reaches disk.
         self._offered: set[str] = set()
 
-    def send(self, text: str) -> str:
-        """Run one turn to completion and return the model's final text."""
+    def send(self, text: str, on_event=None) -> str:
+        """Run one turn to completion and return the model's final text.
+
+        on_event, if given, is called from the worker thread with one of:
+          ("token", str)   — one content delta, many times per step
+          ("tools", [str]) — describe_batch sentences, once per tool step
+          ("done", str)    — the final reply, once at the end
+        When on_event is None, send behaves identically to v0.3.
+        """
         self._offer_candidates()
         self._messages.append({"role": "user", "content": text})
         self._turns += 1
         reply = ""
 
         for _ in range(MAX_STEPS):
-            message = self._client.chat.completions.create(
+            stream = self._client.chat.completions.create(
                 model=MODEL,
                 max_tokens=MAX_TOKENS,
                 messages=[{"role": "system", "content": self._prompt}]
@@ -136,7 +144,9 @@ class Session:
                 + self._messages,
                 tools=self._schemas,
                 tool_choice="auto",
-            ).choices[0].message
+                stream=True,
+            )
+            message = self._consume_stream(stream, on_event)
 
             calls = tool_calls_in(message)
             self._messages.append(self._as_history(message, calls))
@@ -147,6 +157,10 @@ class Session:
 
             # Every call is in hand before any of them runs. That is what
             # makes one dialog for the whole turn possible.
+            if on_event:
+                on_event("tools", describe_batch(
+                    [(name, arguments) for _, name, arguments in calls]
+                ))
             self._gate.prepare([(name, arguments) for _, name, arguments in calls])
 
             for call_id, name, arguments in calls:
@@ -168,7 +182,65 @@ class Session:
         # send() comes back, and ask blocks until answered, so a dialog here
         # would ask about facts drawn from a reply the user has not seen.
         self._pending = notice.candidates(self._client, self._messages)
+        if on_event:
+            on_event("done", reply)
         return reply
+
+    @staticmethod
+    def _consume_stream(stream, on_event):
+        """Accumulate a streaming response into one assistant message.
+
+        Content deltas are concatenated and emitted as "token" events. Tool
+        calls arrive fragmented across chunks — id, name, and arguments in
+        separate deltas keyed by index — and are reassembled here into the
+        same shape tool_calls_in() expects. The reassembly is the load-bearing
+        detail of v0.3.1: getting it wrong looks like a missing tool call.
+        """
+        content_parts: list[str] = []
+        fragments: dict[int, dict] = {}
+        for chunk in stream:
+            delta = chunk.choices[0].delta
+            if delta.content:
+                content_parts.append(delta.content)
+                if on_event:
+                    on_event("token", delta.content)
+            for tc in (getattr(delta, "tool_calls", None) or []):
+                frag = fragments.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
+                if getattr(tc, "id", None):
+                    frag["id"] = tc.id
+                fn = getattr(tc, "function", None)
+                if fn is not None:
+                    if fn.name:
+                        frag["name"] = fn.name
+                    if fn.arguments:
+                        frag["arguments"] += fn.arguments
+        return Session._materialise(content_parts, fragments)
+
+    @staticmethod
+    def _materialise(content_parts: list[str], fragments: dict[int, dict]):
+        """Build the object tool_calls_in() expects from accumulated pieces."""
+
+        class _Function:
+            def __init__(self, name, arguments):
+                self.name = name
+                self.arguments = arguments
+
+        class _Call:
+            def __init__(self, id_, name, arguments):
+                self.id = id_
+                self.function = _Function(name, arguments)
+
+        class _Message:
+            def __init__(self, content, tool_calls):
+                self.content = content
+                self.tool_calls = tool_calls or None
+
+        calls = [
+            _Call(f["id"], f["name"], f["arguments"])
+            for f in (fragments.get(i) for i in sorted(fragments))
+            if f
+        ]
+        return _Message("".join(content_parts) or None, calls if calls else None)
 
     @staticmethod
     def _memory_messages() -> list[dict]:
