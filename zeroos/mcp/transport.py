@@ -179,34 +179,66 @@ class HttpTransport:
             **(headers or {}),
         }
         self._session_id = None
+        # follow_redirects defaults to False in httpx -- left implicit
+        # deliberately: a redirect to another host would replay the
+        # Authorization header above onto it, leaking this server's
+        # credential to wherever it points.
         self._client = httpx.Client(timeout=CALL_TIMEOUT)
         self._ids = itertools.count(1)
 
     def send(self, method: str, params: dict) -> dict:
         request_id = next(self._ids)
-        response = self._post(
+        text, headers, status_code = self._post(
             {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
         )
+        if status_code >= 400:
+            # Status only, never the body or the URL: MCP servers commonly
+            # authenticate by query parameter, and this client's own config
+            # accepts any URL, so an interpolated error/URL can carry a
+            # token straight into the pane or a model prompt.
+            raise TransportError(f"The server refused {method} ({status_code}).")
         # Echoed on every later request to this server, per the Streamable
         # HTTP transport. Read from the initialize reply, but taken from any
         # reply that carries one -- a server is free to rotate it.
-        session_id = response.headers.get("Mcp-Session-Id")
+        session_id = headers.get("Mcp-Session-Id")
         if session_id:
             self._session_id = session_id
-        return _result_of(_body_of(response, method), method)
+        content_type = headers.get("Content-Type", "")
+        return _result_of(_select_frame(text, content_type, method, request_id), method)
 
     def notify(self, method: str, params: dict) -> None:
-        self._post({"jsonrpc": "2.0", "method": method, "params": params})
+        self._post({"jsonrpc": "2.0", "method": method, "params": params}, read_body=False)
 
-    def _post(self, message: dict):
+    def _post(self, message: dict, read_body: bool = True) -> tuple[str, httpx.Headers, int]:
         headers = dict(self._headers)
         if self._session_id:
             headers["Mcp-Session-Id"] = self._session_id
+        # Streamed rather than a plain .post(): httpx.Timeout's read
+        # component bounds each chunk, not the call, so a server dripping
+        # small chunks (SSE keep-alives, slow progress notifications) can
+        # hold a plain .post() open indefinitely. The loop below enforces a
+        # real wall-clock deadline across the whole read, the way
+        # StdioTransport._await bounds its wait.
+        deadline = time.monotonic() + CALL_TIMEOUT
         try:
-            return self._client.post(self._url, json=message, headers=headers)
+            with self._client.stream("POST", self._url, json=message, headers=headers) as response:
+                if not read_body:
+                    # A notification's reply is a status line, nothing more
+                    # -- reading the body would wait on a stream a server is
+                    # free to hold open, which is exactly I1's failure mode.
+                    return "", response.headers, response.status_code
+                chunks = []
+                for chunk in response.iter_text():
+                    chunks.append(chunk)
+                    if time.monotonic() > deadline:
+                        raise TransportError("The server took too long to answer.")
+                return "".join(chunks), response.headers, response.status_code
         except httpx.TimeoutException as error:
             raise TransportError("The server took too long to answer.") from error
-        except httpx.HTTPError as error:
+        except (httpx.HTTPError, httpx.InvalidURL) as error:
+            # InvalidURL is not an HTTPError in httpx 0.28 -- a malformed
+            # authority (typo'd port, etc.) in a hand-edited server config
+            # must not escape as a bare httpx exception either.
             raise TransportError(f"Could not reach the server: {error}") from error
 
     def stderr_tail(self) -> list[str]:
@@ -221,20 +253,56 @@ class HttpTransport:
             pass
 
 
-def _body_of(response, method: str) -> dict:
-    content_type = response.headers.get("Content-Type", "")
-    text = response.text
+def _sse_payloads(text: str) -> list[str]:
+    """One entry per SSE event, with that event's `data:` lines rejoined.
+
+    The wire format lets one event's payload span several `data:` lines
+    (a pretty-printed JSON body, for instance) -- a blank line is what ends
+    an event, not a `data:` line.
+    """
+    payloads = []
+    lines: list[str] = []
+    for line in text.splitlines():
+        if line.startswith("data:"):
+            lines.append(line[len("data:"):].strip())
+        elif not line and lines:
+            payloads.append("\n".join(lines))
+            lines = []
+    if lines:
+        payloads.append("\n".join(lines))
+    return payloads
+
+
+def _select_frame(text: str, content_type: str, method: str, request_id: int) -> dict:
+    """The JSON-RPC frame answering request_id.
+
+    MCP allows notifications interleaved with the result on the same
+    stream in any order, so the answer is not "the last thing on the
+    wire" -- it is the one dict frame, wherever it falls, whose id matches
+    this request. Anything else (a bare array/string, a notification, a
+    stale frame for an earlier id) is not the answer and is skipped rather
+    than trusted.
+    """
     if "text/event-stream" in content_type:
-        payloads = [
-            line[len("data:"):].strip()
-            for line in text.splitlines()
-            if line.startswith("data:")
-        ]
+        payloads = _sse_payloads(text)
         if not payloads:
             raise TransportError(f"The server sent no answer to {method}.")
-        text = payloads[-1]
-    try:
-        parsed = json.loads(text)
-    except ValueError as error:
-        raise TransportError(f"The server's answer to {method} was not readable.") from error
-    return parsed if isinstance(parsed, dict) else {}
+    else:
+        payloads = [text]
+
+    frames = []
+    for payload in payloads:
+        try:
+            parsed = json.loads(payload)
+        except ValueError:
+            continue
+        if isinstance(parsed, dict):
+            frames.append(parsed)
+
+    for frame in reversed(frames):
+        if frame.get("id") == request_id:
+            return frame
+
+    if not frames:
+        raise TransportError(f"The server's answer to {method} was not readable.")
+    raise TransportError(f"The server sent no answer to {method}.")

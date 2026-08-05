@@ -3,6 +3,7 @@ or opens a real connection."""
 
 import json
 import queue
+import socket
 import threading
 import time
 
@@ -221,38 +222,43 @@ def test_unmatched_notifications_do_not_extend_the_deadline(child, monkeypatch):
     assert "too long" in str(caught.value)
 
 
-class FakeResponse:
+class FakeStreamResponse:
+    """Stands in for what httpx.Client.stream() yields. Body is exposed only
+    through iter_text(), same as the real thing, so a test cannot pass by
+    accident via a .text shortcut the implementation doesn't use."""
+
     def __init__(self, body, content_type="application/json", headers=None, status=200):
-        self._body = body
-        self.text = body
+        self._chunks = [body] if isinstance(body, str) else list(body)
         self.status_code = status
         self.headers = {"Content-Type": content_type, **(headers or {})}
 
-    def json(self):
-        return json.loads(self._body)
+    def iter_text(self):
+        yield from self._chunks
 
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise transport.httpx.HTTPStatusError("bad", request=None, response=self)
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
 
 
 @pytest.fixture
-def posted(monkeypatch):
-    """Capture every POST and return queued responses in order."""
+def streamed(monkeypatch):
+    """Capture every streamed POST and return queued responses in order."""
     calls = []
     responses = []
 
-    def fake_post(self, url, **kwargs):
-        calls.append({"url": url, **kwargs})
+    def fake_stream(self, method, url, **kwargs):
+        calls.append({"method": method, "url": url, **kwargs})
         return responses.pop(0)
 
-    monkeypatch.setattr(transport.httpx.Client, "post", fake_post)
+    monkeypatch.setattr(transport.httpx.Client, "stream", fake_stream)
     return calls, responses
 
 
-def test_http_send_posts_json_rpc_and_returns_the_result(posted):
-    calls, responses = posted
-    responses.append(FakeResponse(json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"tools": []}})))
+def test_http_send_posts_json_rpc_and_returns_the_result(streamed):
+    calls, responses = streamed
+    responses.append(FakeStreamResponse(json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"tools": []}})))
     link = transport.HttpTransport("https://example.test/mcp", {"Authorization": "Bearer t"})
     assert link.send("tools/list", {}) == {"tools": []}
     assert calls[0]["url"] == "https://example.test/mcp"
@@ -261,8 +267,8 @@ def test_http_send_posts_json_rpc_and_returns_the_result(posted):
     assert calls[0]["json"]["method"] == "tools/list"
 
 
-def test_a_server_sent_event_response_uses_the_last_data_line(posted):
-    calls, responses = posted
+def test_a_server_sent_event_response_uses_the_matching_result_frame(streamed):
+    calls, responses = streamed
     body = (
         "event: message\n"
         'data: {"jsonrpc":"2.0","id":1,"result":{"stale":true}}\n'
@@ -271,20 +277,62 @@ def test_a_server_sent_event_response_uses_the_last_data_line(posted):
         'data: {"jsonrpc":"2.0","id":1,"result":{"fresh":true}}\n'
         "\n"
     )
-    responses.append(FakeResponse(body, content_type="text/event-stream"))
+    responses.append(FakeStreamResponse(body, content_type="text/event-stream"))
     link = transport.HttpTransport("https://example.test/mcp")
     assert link.send("tools/list", {}) == {"fresh": True}
 
 
-def test_the_session_id_from_initialize_is_echoed_on_later_requests(posted):
-    calls, responses = posted
+def test_id_correlation_finds_the_result_behind_a_trailing_notification(streamed):
+    """I4: a notification frame arriving after the result must not shadow
+    it -- MCP does not guarantee the result is the last thing on the wire."""
+    calls, responses = streamed
+    body = (
+        "event: message\n"
+        'data: {"jsonrpc":"2.0","id":1,"result":{"tools":["real"]}}\n'
+        "\n"
+        "event: message\n"
+        'data: {"jsonrpc":"2.0","method":"notifications/progress","params":{}}\n'
+        "\n"
+    )
+    responses.append(FakeStreamResponse(body, content_type="text/event-stream"))
+    link = transport.HttpTransport("https://example.test/mcp")
+    assert link.send("tools/list", {}) == {"tools": ["real"]}
+
+
+def test_an_sse_stream_with_only_notifications_becomes_a_transport_error(streamed):
+    calls, responses = streamed
+    body = 'event: message\ndata: {"jsonrpc":"2.0","method":"notifications/progress","params":{}}\n\n'
+    responses.append(FakeStreamResponse(body, content_type="text/event-stream"))
+    link = transport.HttpTransport("https://example.test/mcp")
+    with pytest.raises(transport.TransportError):
+        link.send("tools/list", {})
+
+
+def test_a_pretty_printed_sse_event_spanning_several_data_lines_still_parses(streamed):
+    calls, responses = streamed
+    body = (
+        "event: message\n"
+        "data: {\n"
+        'data:   "jsonrpc": "2.0",\n'
+        'data:   "id": 1,\n'
+        'data:   "result": {"ok": true}\n'
+        "data: }\n"
+        "\n"
+    )
+    responses.append(FakeStreamResponse(body, content_type="text/event-stream"))
+    link = transport.HttpTransport("https://example.test/mcp")
+    assert link.send("tools/list", {}) == {"ok": True}
+
+
+def test_the_session_id_from_initialize_is_echoed_on_later_requests(streamed):
+    calls, responses = streamed
     responses.append(
-        FakeResponse(
+        FakeStreamResponse(
             json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}),
             headers={"Mcp-Session-Id": "abc123"},
         )
     )
-    responses.append(FakeResponse(json.dumps({"jsonrpc": "2.0", "id": 2, "result": {}})))
+    responses.append(FakeStreamResponse(json.dumps({"jsonrpc": "2.0", "id": 2, "result": {}})))
     link = transport.HttpTransport("https://example.test/mcp")
     link.send("initialize", {})
     link.send("tools/list", {})
@@ -293,30 +341,40 @@ def test_the_session_id_from_initialize_is_echoed_on_later_requests(posted):
 
 
 def test_a_network_failure_becomes_a_transport_error(monkeypatch):
-    def refuses(self, url, **kwargs):
+    def refuses(self, method, url, **kwargs):
         raise transport.httpx.ConnectError("refused")
 
-    monkeypatch.setattr(transport.httpx.Client, "post", refuses)
+    monkeypatch.setattr(transport.httpx.Client, "stream", refuses)
     link = transport.HttpTransport("https://example.test/mcp")
     with pytest.raises(transport.TransportError):
         link.send("tools/list", {})
 
 
 def test_an_http_timeout_says_so(monkeypatch):
-    def slow(self, url, **kwargs):
+    def slow(self, method, url, **kwargs):
         raise transport.httpx.TimeoutException("slow")
 
-    monkeypatch.setattr(transport.httpx.Client, "post", slow)
+    monkeypatch.setattr(transport.httpx.Client, "stream", slow)
     link = transport.HttpTransport("https://example.test/mcp")
     with pytest.raises(transport.TransportError) as caught:
         link.send("tools/list", {})
     assert "too long" in str(caught.value)
 
 
-def test_a_json_rpc_error_over_http_becomes_a_transport_error(posted):
-    _calls, responses = posted
+def test_a_malformed_url_becomes_a_transport_error_not_a_bare_httpx_exception():
+    """C1: httpx.InvalidURL is a bare Exception, not an HTTPError, in
+    httpx 0.28.1 -- a typo'd port in a hand-edited server config must not
+    escape as one. No mocking: URL validation fails before any I/O."""
+    link = transport.HttpTransport("https://example.test:notaport/mcp", {"Authorization": "Bearer SECRET"})
+    with pytest.raises(transport.TransportError) as caught:
+        link.send("tools/list", {})
+    assert "SECRET" not in str(caught.value)
+
+
+def test_a_json_rpc_error_over_http_becomes_a_transport_error(streamed):
+    _calls, responses = streamed
     responses.append(
-        FakeResponse(
+        FakeStreamResponse(
             json.dumps({"jsonrpc": "2.0", "id": 1, "error": {"message": "unauthorised"}})
         )
     )
@@ -326,20 +384,117 @@ def test_a_json_rpc_error_over_http_becomes_a_transport_error(posted):
     assert "unauthorised" in str(caught.value)
 
 
-def test_an_unparseable_body_becomes_a_transport_error(posted):
-    _calls, responses = posted
-    responses.append(FakeResponse("<html>gateway error</html>"))
+def test_an_unparseable_body_becomes_a_transport_error(streamed):
+    _calls, responses = streamed
+    responses.append(FakeStreamResponse("<html>gateway error</html>"))
     link = transport.HttpTransport("https://example.test/mcp")
     with pytest.raises(transport.TransportError):
         link.send("tools/list", {})
 
 
-def test_http_notify_does_not_read_a_response(posted):
-    calls, responses = posted
-    responses.append(FakeResponse("", content_type="text/plain", status=202))
+def test_a_non_dict_json_body_becomes_a_transport_error(streamed):
+    _calls, responses = streamed
+    responses.append(FakeStreamResponse(json.dumps([1, 2, 3])))
+    link = transport.HttpTransport("https://example.test/mcp")
+    with pytest.raises(transport.TransportError):
+        link.send("tools/list", {})
+
+
+def test_a_non_2xx_status_becomes_a_transport_error_without_leaking_the_url_or_body(streamed):
+    """I3: a 401 with a JSON body used to fall through to _result_of and
+    come back as an empty success. The fix message must also not repeat
+    the query string -- MCP servers commonly authenticate that way."""
+    _calls, responses = streamed
+    responses.append(FakeStreamResponse(json.dumps({"detail": "invalid token"}), status=401))
+    link = transport.HttpTransport("https://example.test/mcp?api_key=SECRET123")
+    with pytest.raises(transport.TransportError) as caught:
+        link.send("tools/list", {})
+    message = str(caught.value)
+    assert "401" in message
+    assert "SECRET123" not in message
+    assert "invalid token" not in message
+
+
+def test_http_notify_sends_a_frame_with_no_id(streamed):
+    calls, responses = streamed
+    responses.append(FakeStreamResponse("", content_type="text/plain", status=202))
     link = transport.HttpTransport("https://example.test/mcp")
     link.notify("notifications/initialized", {})
     assert "id" not in calls[0]["json"]
+
+
+def test_http_notify_returns_without_waiting_for_the_body(monkeypatch):
+    """I2: reading the body -- even to discard it -- blocks on whatever the
+    server does with the connection afterward. A real socket that answers
+    the headers and then holds the body open forever proves notify doesn't
+    wait on it; a mock that never sends bytes at all couldn't tell us that."""
+    monkeypatch.setattr(transport, "CALL_TIMEOUT", 5.0)
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
+    stop = threading.Event()
+
+    def serve():
+        conn, _ = server.accept()
+        conn.recv(65536)
+        conn.sendall(b"HTTP/1.1 202 Accepted\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n")
+        stop.wait(5)  # holds the body open -- a server that never finishes it
+        conn.close()
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    try:
+        link = transport.HttpTransport(f"http://127.0.0.1:{port}/mcp")
+        start = time.monotonic()
+        link.notify("notifications/initialized", {})
+        assert time.monotonic() - start < 1  # did not wait for CALL_TIMEOUT or body close
+    finally:
+        stop.set()
+        server.close()
+        thread.join(timeout=1)
+
+
+def test_a_slow_drip_is_bounded_by_call_timeout_not_left_hanging(monkeypatch):
+    """I1: httpx.Timeout's read component bounds each chunk, not the call
+    -- a server that keeps the connection alive with small chunks can hold
+    a plain .post() open indefinitely. Proven against a real loopback
+    socket, since a fast fake can't demonstrate a wall-clock bound."""
+    monkeypatch.setattr(transport, "CALL_TIMEOUT", 1.0)
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
+    stop = threading.Event()
+
+    def serve():
+        conn, _ = server.accept()
+        conn.recv(65536)
+        conn.sendall(
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n"
+        )
+        while not stop.is_set():
+            try:
+                conn.sendall(b": keep-alive\n\n")
+            except OSError:
+                return
+            stop.wait(0.3)
+        conn.close()
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    try:
+        link = transport.HttpTransport(f"http://127.0.0.1:{port}/mcp")
+        start = time.monotonic()
+        with pytest.raises(transport.TransportError) as caught:
+            link.send("tools/list", {})
+        elapsed = time.monotonic() - start
+        assert "too long" in str(caught.value)
+        assert elapsed < 3  # bounded, not the drip running forever
+    finally:
+        stop.set()
+        server.close()
+        thread.join(timeout=1)
 
 
 def test_http_has_no_stderr_and_closing_never_raises():
