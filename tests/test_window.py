@@ -55,6 +55,7 @@ class _StubSession:
     def __init__(self, *args, **kwargs):
         self.closed = 0
         self.summaries = []
+        self._gate = None  # window.py's mount.load thread reads this
 
     def close(self, summary=True):
         self.closed += 1
@@ -315,3 +316,19 @@ def test_streaming_tool_event_appends_a_dimmed_row(monkeypatch):
     assert any("Checking" in t for t in texts), "streamed text must remain"
     assert any("Move a.pdf" in t for t in texts), "the tools row must appear"
     assert chat._streaming_label is None, "tools must reset the streaming bubble"
+
+
+def test_the_window_loads_mounts_off_the_main_thread():
+    """Spec section 5: a dead remote server costs the 120-second call timeout,
+    and on the main thread that is 120 seconds of no window at all. The
+    constructor must start a worker thread whose target is mount.load."""
+    import inspect
+
+    from zeroos.mcp import mount
+
+    source = inspect.getsource(window.ChatWindow.__init__)
+    assert "mount.load" in source, (
+        "__init__ must call mount.load off the main thread so the window "
+        "presents immediately with builtins"
+    )
+    assert "threading.Thread" in source, "the mount load must run on a worker thread"

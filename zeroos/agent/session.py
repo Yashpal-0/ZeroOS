@@ -17,6 +17,7 @@ import openai
 from zeroos.agent import history, log, notice, usage
 from zeroos.agent.prompt import MEMORY_CLOSING, MEMORY_PREFACE, PROMPTS
 from zeroos.catalog.registry import build
+from zeroos.mcp import mount
 from zeroos.platform import memory, settings
 from zeroos.policy.describe import describe_batch
 from zeroos.policy.gate import DENIED_MESSAGE, Gate
@@ -97,8 +98,7 @@ class Session:
         client=None,
     ) -> None:
         self._gate = Gate(ask)
-        self._tools = {tool.name: tool for tool in build(self._gate)}
-        self._schemas = [schema_for(tool) for tool in self._tools.values()]
+        self._rebuild_tools()
         self._messages: list[dict] = []
         self._client = client or openai.OpenAI(api_key=api_key, base_url=BASE_URL)
         # Resolved once, here — not per turn and not per step. A prompt built
@@ -137,6 +137,7 @@ class Session:
           ("done", str)    — the final reply, once at the end
         When on_event is None, send behaves identically to v0.3.
         """
+        self._refresh_tools_if_remounted()
         self._offer_candidates()
         self._messages.append({"role": "user", "content": text})
         self._turns += 1
@@ -354,6 +355,28 @@ class Session:
             except Exception:
                 pass
         usage.record(self._started, self._turns, self._actions, self._declined)
+
+    def _rebuild_tools(self) -> None:
+        """Builtins plus everything mounted, in one dict.
+
+        registry.build() stays builtin-only -- that is what test_registry.py's
+        three-place rule was written to check -- so the composition happens
+        here, where the wire format already lives.
+        """
+        self._mounted_at = mount.generation()
+        self._tools = {tool.name: tool for tool in build(self._gate) + mount.tools()}
+        self._schemas = [schema_for(tool) for tool in self._tools.values()]
+
+    def _refresh_tools_if_remounted(self) -> None:
+        """Pick up a pane change at the start of a turn, never mid-turn.
+
+        A rebuild inside the step loop would swap the dict the loop is
+        dispatching through and the schema list already sent to the model,
+        which is a race for no benefit -- the user who just added a server can
+        wait until their next message.
+        """
+        if mount.generation() != self._mounted_at:
+            self._rebuild_tools()
 
     def _run(self, name: str, arguments: dict) -> str:
         """Execute one call. Always returns a string for the model to read."""

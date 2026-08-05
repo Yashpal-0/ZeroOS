@@ -854,3 +854,62 @@ def test_the_closing_summary_still_reads_the_whole_conversation(home):
     sent = str(noticing[-1]["messages"])
     assert "ask about the first thing" in sent
     assert "ask about the second thing" in sent
+
+
+# --- Mounted tools compose with builtins (v0.3, Task 9) ---
+
+class FakeMounted:
+    """Wears RemoteTool's four members, which is all session.py consumes."""
+
+    def __init__(self, name="mcp__s__t"):
+        self.name = name
+        self.description = "A mounted tool."
+        self.input_schema = {"type": "object", "properties": {}}
+        self.calls = []
+
+    def call(self, arguments):
+        self.calls.append(arguments)
+        return "mounted result"
+
+
+def test_a_mounted_tool_dispatches_through_the_same_path_as_a_builtin(monkeypatch):
+    mounted = FakeMounted()
+    monkeypatch.setattr(session_module.mount, "tools", lambda: [mounted])
+    monkeypatch.setattr(session_module.mount, "generation", lambda: 1)
+    session = session_module.Session(api_key="k", ask=lambda rows: [True] * len(rows), client=object())
+    assert session._run("mcp__s__t", {"x": 1}) == "mounted result"
+    assert mounted.calls == [{"x": 1}]
+
+
+def test_a_mounted_tool_reaches_the_schemas_sent_to_the_model(monkeypatch):
+    monkeypatch.setattr(session_module.mount, "tools", lambda: [FakeMounted()])
+    monkeypatch.setattr(session_module.mount, "generation", lambda: 1)
+    session = session_module.Session(api_key="k", ask=lambda rows: [True] * len(rows), client=object())
+    names = [schema["function"]["name"] for schema in session._schemas]
+    assert "mcp__s__t" in names
+    assert "read_text_file" in names
+
+
+def test_a_remount_is_picked_up_at_the_start_of_the_next_turn(monkeypatch):
+    generation = {"n": 1}
+    mounted = []
+    monkeypatch.setattr(session_module.mount, "tools", lambda: list(mounted))
+    monkeypatch.setattr(session_module.mount, "generation", lambda: generation["n"])
+    session = session_module.Session(api_key="k", ask=lambda rows: [True] * len(rows), client=object())
+    assert "mcp__s__t" not in session._tools
+
+    mounted.append(FakeMounted())
+    generation["n"] = 2
+    assert "mcp__s__t" not in session._tools, "not picked up until a turn starts"
+
+    session._refresh_tools_if_remounted()
+    assert "mcp__s__t" in session._tools
+
+
+def test_an_unchanged_generation_does_not_rebuild(monkeypatch):
+    monkeypatch.setattr(session_module.mount, "tools", lambda: [])
+    monkeypatch.setattr(session_module.mount, "generation", lambda: 7)
+    session = session_module.Session(api_key="k", ask=lambda rows: [True] * len(rows), client=object())
+    before = session._tools
+    session._refresh_tools_if_remounted()
+    assert session._tools is before

@@ -15,6 +15,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
 from zeroos.agent.session import Session  # noqa: E402
+from zeroos.mcp import mount  # noqa: E402
 from zeroos.platform.system import remember_clipboard  # noqa: E402
 from zeroos.surface import recall  # noqa: E402
 from zeroos.surface.dialog import ask_on_main_thread  # noqa: E402
@@ -82,6 +83,13 @@ class ChatWindow(Adw.ApplicationWindow):
         super().__init__(application=application, default_width=720, default_height=560,
                          title="ZeroOS")
         self._session = Session(api_key=api_key, ask=lambda rows: ask_on_main_thread(self, rows))
+        # Off the main thread, always. A dead remote server costs the
+        # 120-second call timeout, and on the main thread that is 120 seconds
+        # of no window at all. The window presents immediately with builtins;
+        # mounted tools join at the start of the first turn after this returns.
+        threading.Thread(
+            target=lambda: mount.load(self._session._gate), daemon=True
+        ).start()
         self._busy = False
         self._closing = False
         # The Gtk.Label tokens are streaming into, or None when the next token
@@ -149,6 +157,7 @@ class ChatWindow(Adw.ApplicationWindow):
 
         def finish() -> None:
             self._session.close(summary=summary)
+            mount.close_all()
             GLib.idle_add(self.destroy)
 
         threading.Thread(target=finish, daemon=True).start()
