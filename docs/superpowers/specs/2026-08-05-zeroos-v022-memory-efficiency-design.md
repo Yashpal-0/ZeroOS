@@ -44,7 +44,7 @@ which is why `policy/`, `catalog/`, and `surface/` are unaffected.
 | Layer | What | Fixes |
 |---|---|---|
 | A | Fact hygiene | Defects 1–3 |
-| B | Retrieval: in-memory FTS5 + BM25, pinned facts, char budget | Wall 5 |
+| B | Retrieval: in-memory FTS5 + BM25, pinned facts, ten-fact injection | Wall 5 |
 | C | Noticing pass reads one turn, not the transcript | Defect 4 |
 | D | Capacity policy: the storage count cap is deleted; injection is budgeted | Wall 5 (policy half) |
 
@@ -112,23 +112,34 @@ ever grows past this design`. See §6 for why this, rather than a count cap,
 is now the real ceiling.
 
 The index lives in `platform/memory.py` alongside the store it mirrors
-(new functions, not a new module): `search(query, limit_chars) ->
-list[dict]` is the whole public surface.
+(new functions, not a new module): `search(query, limit) -> list[dict]` is
+the whole public surface.
 
 ### Selection
 
-On every model step, `_memory_messages()` injects:
+On every model step, `_memory_messages()` injects **at most ten facts** —
+`MAX_INJECTED = 10`, the only constant in this layer:
 
-1. **Every pinned fact**, always, in storage order.
-2. **Unpinned facts ranked by BM25** against the current user message, added
-   until a **2,000-character budget** (fact text, roughly 12 facts) is
-   exhausted. Pinned facts count against the budget first; pinning past the
-   budget is the user's prerogative and wins over retrieval.
+1. **Pinned facts first**, in storage order.
+2. **Unpinned facts ranked by BM25** against the current user message,
+   filling whatever of the ten remains.
+
+Ten is a count rather than a character budget because `MAX_CHARS` already
+bounds a fact at 1,000: ten facts is at most 10,000 characters (~2,500
+tokens) whatever they contain, so a second budget constant would bound
+something already bounded.
 
 The query is the text of the current turn's user message, FTS-escaped
-(quoted terms, OR-joined). A store whose entire contents fit the budget is
-injected whole — today's ten facts behave exactly as they do now, with no
-threshold constant and no special case.
+(quoted terms, OR-joined). A store of ten or fewer facts is injected whole —
+today's store behaves exactly as it does now, with no threshold constant and
+no special case.
+
+**Pinning past ten.** Pinned facts fill the ten first, so eleven pins would
+silently drop one — a user's explicit choice discarded without a word, which
+is the one failure this design will not ship. The recall pane shows the pin
+count against the limit and refuses the eleventh pin, telling the user to
+unpin something first. The block is therefore never more than ten facts and
+never less than every pin the user was allowed to make.
 
 ### Pinning
 
@@ -174,9 +185,9 @@ reaches the model.
 
 The 950 ruling of 2026-08-04 set the count from a token budget — the store
 was capped because everything in it was injected. Retrieval severs that
-link. Injection is now bounded by the 2,000-character budget of §4
-regardless of how much is stored, so a cap on *storage* protects nothing
-and only refuses facts the user wanted kept.
+link. Injection is now bounded at ten facts (§4) regardless of how much is
+stored, so a cap on *storage* protects nothing and only refuses facts the
+user wanted kept.
 
 What this deletes:
 
@@ -186,11 +197,11 @@ What this deletes:
   "full" state.
 - The three cap tests in `tests/test_catalog_memory.py` and the full-store
   token estimate in `tests/test_memory.py`, replaced by a test that the
-  *injected block* stays within budget at 500 facts.
+  *injected block* stays at ten facts with 500 stored.
 
 **`MAX_CHARS = 1000` stays.** It bounds one fact, not the count, and it is
-load-bearing for two things a count cap never protected: a single fact must
-fit inside the injection budget rather than consuming it whole, and it must
+load-bearing for two things a count cap never protected: it is what makes
+"ten facts" a bounded number of characters (§4), and a fact must
 be readable in an approval dialog row — the v0.2 acceptance walk already
 found an oversized row running off the dialog's edge.
 
@@ -242,8 +253,9 @@ New tests, alongside the existing 317 which must stay green:
   exact-dupe candidates are dropped; `INSTRUCTION` and `MEMORY_PREFACE`
   contain the third-person and format-closing lines.
 - **B:** a query matching one fact retrieves it ahead of non-matching facts;
-  pinned facts are injected even when they match nothing; the char budget is
-  respected; a store smaller than the budget is injected whole; FTS
+  pinned facts are injected even when they match nothing; never more than
+  ten facts are injected; a store of ten or fewer is injected whole; an
+  eleventh pin is refused by the pane; FTS
   operators in a user message do not raise; index failure falls back to
   inject-all; `load()` tolerates a missing `pinned` field.
 - **C:** the noticing pass receives only messages appended since the last
@@ -258,8 +270,8 @@ Deleted tests, and why each is now wrong rather than merely stale:
 `test_catalog_memory.py:105` (at-cap refusal), `:184` and `:199` (forget
 makes room at the cap) assert a refusal that no longer exists;
 `test_memory.py:174` bounds the prompt by `MAX_FACTS * MAX_CHARS`, which is
-no longer what bounds the prompt — the injection budget is, and criterion 4
-tests it directly.
+no longer what bounds the prompt — `MAX_INJECTED` is, and criterion 4 tests
+it directly.
 
 ## 10. Files touched
 
@@ -270,7 +282,7 @@ tests it directly.
 | `zeroos/agent/session.py` | `_memory_messages()` calls `search()`; noticing slice bookkeeping |
 | `zeroos/platform/memory.py` | Delete `MAX_FACTS`; `pinned` field tolerance; FTS index + `search()` |
 | `zeroos/catalog/memory.py` | Delete the at-cap branch; `remember` docstring: third person |
-| `zeroos/surface/recall.py` | Pin switch per fact row |
+| `zeroos/surface/recall.py` | Pin switch per fact row; pin count against the limit; refuse the eleventh |
 | `tests/test_catalog_memory.py`, `tests/test_memory.py` | Delete the four cap tests (§9) |
 | `README.md`, `docs/roadmap.md` | "Up to 950 facts" is no longer true — unlimited storage, budgeted injection |
 
@@ -284,13 +296,13 @@ Estimate ~200 lines including tests.
    old ones grandfathered).
 3. A candidate matching a stored fact, a bracketed placeholder, or a
    sub-15-char line is never offered.
-4. With 500 synthetic facts stored, the injected memory block stays within
-   2,000 characters of fact text and contains the facts matching the turn's
-   query plus all pinned facts.
+4. With 500 synthetic facts stored, the injected memory block holds exactly
+   ten facts: every pinned one, then the highest-ranked matches for the
+   turn's query.
 5. Per-turn noticing input is one turn's messages regardless of session
    length.
 6. A pinned fact appears in the block for a query it does not match.
 7. Storing 1,000 facts succeeds — no count refuses, and criterion 4 still
    holds at that size.
-8. Full suite green; the sub-budget store path produces the same injected
-   block as v0.2.1 did.
+8. Full suite green; a store of ten or fewer facts produces the same
+   injected block as v0.2.1 did.
