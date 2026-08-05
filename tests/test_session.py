@@ -745,3 +745,71 @@ def test_the_memory_block_ends_with_the_format_reminder(home):
     block = system_messages(client.requests[0])[1]["content"]
     assert block.endswith(MEMORY_CLOSING)
     assert block.index("Yash keeps tax PDFs") < block.index(MEMORY_CLOSING)
+
+
+def test_a_large_store_injects_only_the_limit(home):
+    from zeroos.platform import memory
+
+    for n in range(500):
+        memory.add(f"Yash owns document number {n}")
+    session, _, client = build_session([FakeMessage(content="hello")], [])
+    session.send("which document is it")
+    block = system_messages(client.requests[0])[1]["content"]
+    facts = [line for line in block.splitlines() if line.startswith("[")]
+    assert len(facts) == memory.MAX_INJECTED
+
+
+def test_the_injected_facts_are_the_ones_the_turn_is_about(home):
+    from zeroos.platform import memory
+
+    memory.add("Yash keeps tax PDFs in Documents")
+    for n in range(50):
+        memory.add(f"Yash owns thing number {n}")
+    session, _, client = build_session([FakeMessage(content="hello")], [])
+    session.send("where are my tax pdfs")
+    block = system_messages(client.requests[0])[1]["content"]
+    assert "Yash keeps tax PDFs in Documents" in block
+
+
+def test_the_query_is_the_users_message_not_the_last_tool_result(home):
+    """Inside the step loop the last message is usually a tool result. Ranking
+    facts against a directory listing would make the second step of a turn
+    retrieve something different from the first, for no reason the user could
+    see."""
+    from zeroos.platform import memory
+
+    memory.add("Yash keeps tax PDFs in Documents")
+    for n in range(50):
+        memory.add(f"Yash owns thing number {n}")
+    responses = [
+        FakeMessage(tool_calls=[tool_call("1", "list_folder", path=str(home / "Downloads"))]),
+        FakeMessage(content="done"),
+    ]
+    session, _, client = build_session(responses, [])
+    session.send("where are my tax pdfs")
+    first = system_messages(client.requests[0])[1]["content"]
+    second = system_messages(client.requests[1])[1]["content"]
+    assert first == second
+
+
+def test_a_fact_outside_the_block_is_unreachable_by_conversation(home):
+    """Above ten stored facts, the model can only cite ids it was shown, so a
+    fact that neither matches nor is recent cannot be named in a forget call.
+
+    Accepted rather than fixed (spec §4): the recall pane deletes any fact, so
+    nothing is lost — only unreachable by phrasing. The failure that would
+    matter, forgetting the *wrong* fact, is impossible for the same reason,
+    and an invented id is already refused by
+    test_forget_an_unknown_id_says_so_without_raising.
+    """
+    from zeroos.platform import memory
+
+    buried = memory.add("Yash keeps tax PDFs in Documents")
+    for n in range(50):
+        memory.add(f"Yash owns thing number {n}")
+    session, _, client = build_session([FakeMessage(content="hello")], [])
+    session.send("what did I say about dark mode")
+
+    block = system_messages(client.requests[0])[1]["content"]
+    assert buried not in block
+    assert memory.text_of(buried) == "Yash keeps tax PDFs in Documents"

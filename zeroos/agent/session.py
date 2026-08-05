@@ -140,7 +140,7 @@ class Session:
                 model=MODEL,
                 max_tokens=MAX_TOKENS,
                 messages=[{"role": "system", "content": self._prompt}]
-                + self._memory_messages()
+                + self._memory_messages(text)
                 + self._messages,
                 tools=self._schemas,
                 tool_choice="auto",
@@ -242,13 +242,20 @@ class Session:
         ]
         return _Message("".join(content_parts) or None, calls if calls else None)
 
-    @staticmethod
-    def _memory_messages() -> list[dict]:
+    def _memory_messages(self, query: str) -> list[dict]:
         """The second system message, or nothing at all.
+
+        `query` is the text the user typed this turn, not the most recent
+        message: inside the step loop that is usually a tool result, and
+        ranking facts against a directory listing would change what the model
+        remembers halfway through a turn. Constant across every step, so the
+        block is stable within a turn.
 
         Read inside the step loop, not once per turn: a remember approved
         halfway through a turn must be visible to the next model call in that
         same turn, or the assistant appears to forget what it just confirmed.
+        search() rebuilds its index per call, so there is nothing to
+        invalidate when that happens.
 
         Empty means omitted, not sent blank — a fresh install's request
         carries exactly one system message, and nothing section 3 adds can
@@ -260,7 +267,7 @@ class Session:
         joining them is this layer's job, which is what keeps the store free
         of prompt text and importable from policy/describe.py.
         """
-        facts = memory.load()
+        facts = memory.search(query)
         if not facts:
             return []
         lines = "\n".join(f"[{f['id']}] {f['text']}" for f in facts)
