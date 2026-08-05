@@ -197,3 +197,35 @@ def test_control_characters_in_a_command_are_stripped():
 
 def test_a_missing_command_argument_does_not_raise():
     assert isinstance(describe.describe_batch([("run_command", {})])[0], str)
+
+
+def test_an_mcp_row_is_the_name_and_the_raw_arguments():
+    row = describe.describe_batch(
+        [("mcp__filesystem__read_file", {"path": "/home/yash/notes.md"})]
+    )[0]
+    assert row == 'mcp__filesystem__read_file {"path": "/home/yash/notes.md"}'
+
+
+def test_an_mcp_row_does_not_paraphrase():
+    """ZeroOS does not know what an arbitrary server's tool does, and copy that
+    guesses would be copy that occasionally lies in the one place the user is
+    being asked to decide."""
+    row = describe.describe_batch([("mcp__linear__create_issue", {"title": "x"})])[0]
+    assert "mcp__linear__create_issue" in row
+    assert "Run mcp" not in row
+
+
+def test_a_huge_mcp_argument_blob_is_capped():
+    row = describe.describe_batch([("mcp__s__t", {"blob": "x" * 20_000})])[0]
+    assert len(row) <= memory.MAX_CHARS + 1
+    assert row.endswith("…")
+
+
+def test_non_ascii_mcp_arguments_are_not_escaped():
+    row = describe.describe_batch([("mcp__s__t", {"note": "café"})])[0]
+    assert "café" in row
+
+
+def test_unserialisable_mcp_arguments_do_not_raise():
+    row = describe.describe_batch([("mcp__s__t", {"when": object()})])[0]
+    assert isinstance(row, str)

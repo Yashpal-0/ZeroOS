@@ -3,10 +3,12 @@
 Spec section 4.4: folder names not paths, counts not lists, no jargon.
 """
 
+import json
 from pathlib import Path
 
 from zeroos.platform import memory, paths
 from zeroos.platform.memory import strip_control
+from zeroos.policy.tiers import MCP_PREFIX
 
 TRASH_REASSURANCE = (
     "Files moved to the trash can be restored. ZeroOS never permanently deletes anything."
@@ -65,6 +67,19 @@ def _single(tool: str, args: dict) -> str:
         # around itself.
         command = strip_control(args.get("command", ""))
         return f"Run this command on your computer:\n  {command}"
+    if tool.startswith(MCP_PREFIX):
+        # No paraphrase. ZeroOS does not know what an arbitrary server's tool
+        # does, and copy that guesses would be copy that occasionally lies in
+        # the one place the user is being asked to decide. The honest row is
+        # the one showing exactly what is about to be sent.
+        try:
+            rendered = json.dumps(args, ensure_ascii=False)
+        except (TypeError, ValueError):
+            rendered = str(args)
+        # Capped, unlike run_command above: a server's arguments can be an
+        # arbitrarily large blob, and one call must not make the dialog
+        # unreadable.
+        return _for_display(f"{tool} {rendered}")
     if tool == "create_folder":
         return f"Create a folder called {_name(args['path'])} in {_folder(args['path'])}"
     if tool == "write_text_file":
