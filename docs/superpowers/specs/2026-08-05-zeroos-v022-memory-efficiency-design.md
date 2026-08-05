@@ -28,9 +28,11 @@ in the real store and transcript on 2026-08-05:
 4. **Noticing cost grows with session length.** `notice.candidates()`
    receives the entire accumulated transcript every turn. Turn 40 pays for
    forty turns of reading, on a reasoning model, every turn.
-5. **The scaling wall.** At the 950 × 1000 ceiling, inject-everything costs
-   ~220,000 prompt tokens per model step, relevant or not. Nothing hits this
-   today; v0.2.2 removes it before anything can.
+5. **The scaling wall.** Injection is unbudgeted: every stored fact goes out
+   on every model step, relevant or not. At the old 950 × 1000 ceiling that
+   is ~220,000 prompt tokens per step. Nothing hits this today; v0.2.2
+   removes it before anything can — and in doing so removes the reason the
+   ceiling existed.
 
 ## 2. Shape of the fix
 
@@ -44,7 +46,7 @@ which is why `policy/`, `catalog/`, and `surface/` are unaffected.
 | A | Fact hygiene | Defects 1–3 |
 | B | Retrieval: in-memory FTS5 + BM25, pinned facts, char budget | Wall 5 |
 | C | Noticing pass reads one turn, not the transcript | Defect 4 |
-| D | Capacity policy: storage cap stays, injection is budgeted | Wall 5 (policy half) |
+| D | Capacity policy: the storage count cap is deleted; injection is budgeted | Wall 5 (policy half) |
 
 ## 3. Layer A — fact hygiene
 
@@ -103,10 +105,11 @@ byte-for-byte. There is no second data file and no migration.
 ### The index is in-memory and per-session
 
 An SQLite FTS5 table (`:memory:`) is built from `load()` when the session
-starts and rebuilt after any `remember` or `forget`. 950 rows build in
-milliseconds; rebuilding beats invalidation logic at this size — marked
-`ponytail: full rebuild on write; incremental updates if the store ever
-grows past this design`.
+starts and rebuilt after any `remember` or `forget`. A few thousand rows
+build in milliseconds; rebuilding beats invalidation logic at that size —
+marked `ponytail: full rebuild on write; incremental updates if the store
+ever grows past this design`. See §6 for why this, rather than a count cap,
+is now the real ceiling.
 
 The index lives in `platform/memory.py` alongside the store it mirrors
 (new functions, not a new module): `search(query, limit_chars) ->
@@ -166,17 +169,41 @@ accumulated transcript. Per-turn noticing cost becomes flat.
 
 ## 6. Layer D — capacity policy
 
-**The storage cap stays 950 × 1000** (user ruling, 2026-08-04: the ceiling
-is a share of the context window). Retrieval changes what the ceiling
-means: it now bounds *disk*, not *prompt*. The prompt is bounded by the
-2,000-character injection budget regardless of store size, so a full store
-costs the same per turn as a near-empty one.
+**`MAX_FACTS` is deleted. Storage is unlimited.** The only limit is on what
+reaches the model.
+
+The 950 ruling of 2026-08-04 set the count from a token budget — the store
+was capped because everything in it was injected. Retrieval severs that
+link. Injection is now bounded by the 2,000-character budget of §4
+regardless of how much is stored, so a cap on *storage* protects nothing
+and only refuses facts the user wanted kept.
+
+What this deletes:
+
+- `memory.MAX_FACTS` and its derivation comment in `platform/memory.py`.
+- The at-cap branch in `remember` (`catalog/memory.py`) — the refusal string
+  and the consolidation instruction inside it. `remember` no longer has a
+  "full" state.
+- The three cap tests in `tests/test_catalog_memory.py` and the full-store
+  token estimate in `tests/test_memory.py`, replaced by a test that the
+  *injected block* stays within budget at 500 facts.
+
+**`MAX_CHARS = 1000` stays.** It bounds one fact, not the count, and it is
+load-bearing for two things a count cap never protected: a single fact must
+fit inside the injection budget rather than consuming it whole, and it must
+be readable in an approval dialog row — the v0.2 acceptance walk already
+found an oversized row running off the dialog's edge.
+
+**The new ceiling is I/O, not policy.** `load()` parses the whole file on
+every call, `_write()` rewrites it on every add, and the FTS index rebuilds
+after every write — all O(n). That is comfortable into the low thousands of
+facts and is marked with a `ponytail:` comment naming the upgrade path
+(SQLite as the store of record, incremental index updates) rather than
+pre-solving it.
 
 Dropped from this design, deliberately:
 
-- **The 80% consolidation nudge.** With injection budgeted, a large store
-  has no per-turn cost, so there is nothing to nudge about. The existing
-  at-cap refusal text in `remember` stays exactly as shipped.
+- **The 80% consolidation nudge.** There is no cap left to approach.
 - **Decay.** Its purpose — stale facts out of the prompt — is what BM25
   ranking already does. A stale fact simply stops matching queries. Revisit
   trigger: pinned-plus-top-K demonstrably injecting irrelevant facts.
@@ -203,8 +230,9 @@ retrieval and injects pinned facts only.
 | `pin` tool for the model | Pinning is a consent decision; only the user makes it |
 | Pronoun migration of stored facts | Cannot be done mechanically without changing meaning; preface line covers it |
 | Decay / last-used tracking | Subsumed by ranking; trigger recorded in §6 |
-| Consolidation nudge at 80% | No per-turn cost left to save; at-cap text unchanged |
+| Consolidation nudge, at-cap refusal | No cap left to approach (§6) |
 | Second data file / migration | In-memory index over the existing jsonl |
+| SQLite as the store of record | The jsonl is readable, atomic, and tested. Named as the upgrade path in §6, not taken now |
 
 ## 9. Testing
 
@@ -220,8 +248,18 @@ New tests, alongside the existing 317 which must stay green:
   inject-all; `load()` tolerates a missing `pinned` field.
 - **C:** the noticing pass receives only messages appended since the last
   pass; the closing summary still receives the full conversation.
+- **D:** `remember` succeeds past the old 950 — no branch refuses on count;
+  `memory.MAX_FACTS` no longer exists; a fact over `MAX_CHARS` is still
+  rejected with its message.
 - **Integration:** the second system message is rebuilt between steps
   (existing test) and still carries preface + facts + closing line in order.
+
+Deleted tests, and why each is now wrong rather than merely stale:
+`test_catalog_memory.py:105` (at-cap refusal), `:184` and `:199` (forget
+makes room at the cap) assert a refusal that no longer exists;
+`test_memory.py:174` bounds the prompt by `MAX_FACTS * MAX_CHARS`, which is
+no longer what bounds the prompt — the injection budget is, and criterion 4
+tests it directly.
 
 ## 10. Files touched
 
@@ -230,9 +268,11 @@ New tests, alongside the existing 317 which must stay green:
 | `zeroos/agent/notice.py` | INSTRUCTION rewrite; junk + dupe filters |
 | `zeroos/agent/prompt.py` | MEMORY_PREFACE: pronoun line + format closing line |
 | `zeroos/agent/session.py` | `_memory_messages()` calls `search()`; noticing slice bookkeeping |
-| `zeroos/platform/memory.py` | `pinned` field tolerance; FTS index + `search()` |
-| `zeroos/catalog/memory.py` | `remember` docstring: third person, consolidation batching |
+| `zeroos/platform/memory.py` | Delete `MAX_FACTS`; `pinned` field tolerance; FTS index + `search()` |
+| `zeroos/catalog/memory.py` | Delete the at-cap branch; `remember` docstring: third person |
 | `zeroos/surface/recall.py` | Pin switch per fact row |
+| `tests/test_catalog_memory.py`, `tests/test_memory.py` | Delete the four cap tests (§9) |
+| `README.md`, `docs/roadmap.md` | "Up to 950 facts" is no longer true — unlimited storage, budgeted injection |
 
 Estimate ~200 lines including tests.
 
@@ -250,5 +290,7 @@ Estimate ~200 lines including tests.
 5. Per-turn noticing input is one turn's messages regardless of session
    length.
 6. A pinned fact appears in the block for a query it does not match.
-7. Full suite green; the sub-budget store path produces the same injected
+7. Storing 1,000 facts succeeds — no count refuses, and criterion 4 still
+   holds at that size.
+8. Full suite green; the sub-budget store path produces the same injected
    block as v0.2.1 did.
