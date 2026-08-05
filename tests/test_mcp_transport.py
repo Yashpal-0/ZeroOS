@@ -219,3 +219,131 @@ def test_unmatched_notifications_do_not_extend_the_deadline(child, monkeypatch):
         link.send("tools/list", {})
     assert time.monotonic() - start < 1  # bounded by CALL_TIMEOUT, not 0.6s of chatter
     assert "too long" in str(caught.value)
+
+
+class FakeResponse:
+    def __init__(self, body, content_type="application/json", headers=None, status=200):
+        self._body = body
+        self.text = body
+        self.status_code = status
+        self.headers = {"Content-Type": content_type, **(headers or {})}
+
+    def json(self):
+        return json.loads(self._body)
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise transport.httpx.HTTPStatusError("bad", request=None, response=self)
+
+
+@pytest.fixture
+def posted(monkeypatch):
+    """Capture every POST and return queued responses in order."""
+    calls = []
+    responses = []
+
+    def fake_post(self, url, **kwargs):
+        calls.append({"url": url, **kwargs})
+        return responses.pop(0)
+
+    monkeypatch.setattr(transport.httpx.Client, "post", fake_post)
+    return calls, responses
+
+
+def test_http_send_posts_json_rpc_and_returns_the_result(posted):
+    calls, responses = posted
+    responses.append(FakeResponse(json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"tools": []}})))
+    link = transport.HttpTransport("https://example.test/mcp", {"Authorization": "Bearer t"})
+    assert link.send("tools/list", {}) == {"tools": []}
+    assert calls[0]["url"] == "https://example.test/mcp"
+    assert calls[0]["headers"]["Accept"] == "application/json, text/event-stream"
+    assert calls[0]["headers"]["Authorization"] == "Bearer t"
+    assert calls[0]["json"]["method"] == "tools/list"
+
+
+def test_a_server_sent_event_response_uses_the_last_data_line(posted):
+    calls, responses = posted
+    body = (
+        "event: message\n"
+        'data: {"jsonrpc":"2.0","id":1,"result":{"stale":true}}\n'
+        "\n"
+        "event: message\n"
+        'data: {"jsonrpc":"2.0","id":1,"result":{"fresh":true}}\n'
+        "\n"
+    )
+    responses.append(FakeResponse(body, content_type="text/event-stream"))
+    link = transport.HttpTransport("https://example.test/mcp")
+    assert link.send("tools/list", {}) == {"fresh": True}
+
+
+def test_the_session_id_from_initialize_is_echoed_on_later_requests(posted):
+    calls, responses = posted
+    responses.append(
+        FakeResponse(
+            json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}),
+            headers={"Mcp-Session-Id": "abc123"},
+        )
+    )
+    responses.append(FakeResponse(json.dumps({"jsonrpc": "2.0", "id": 2, "result": {}})))
+    link = transport.HttpTransport("https://example.test/mcp")
+    link.send("initialize", {})
+    link.send("tools/list", {})
+    assert "Mcp-Session-Id" not in calls[0]["headers"]
+    assert calls[1]["headers"]["Mcp-Session-Id"] == "abc123"
+
+
+def test_a_network_failure_becomes_a_transport_error(monkeypatch):
+    def refuses(self, url, **kwargs):
+        raise transport.httpx.ConnectError("refused")
+
+    monkeypatch.setattr(transport.httpx.Client, "post", refuses)
+    link = transport.HttpTransport("https://example.test/mcp")
+    with pytest.raises(transport.TransportError):
+        link.send("tools/list", {})
+
+
+def test_an_http_timeout_says_so(monkeypatch):
+    def slow(self, url, **kwargs):
+        raise transport.httpx.TimeoutException("slow")
+
+    monkeypatch.setattr(transport.httpx.Client, "post", slow)
+    link = transport.HttpTransport("https://example.test/mcp")
+    with pytest.raises(transport.TransportError) as caught:
+        link.send("tools/list", {})
+    assert "too long" in str(caught.value)
+
+
+def test_a_json_rpc_error_over_http_becomes_a_transport_error(posted):
+    _calls, responses = posted
+    responses.append(
+        FakeResponse(
+            json.dumps({"jsonrpc": "2.0", "id": 1, "error": {"message": "unauthorised"}})
+        )
+    )
+    link = transport.HttpTransport("https://example.test/mcp")
+    with pytest.raises(transport.TransportError) as caught:
+        link.send("tools/list", {})
+    assert "unauthorised" in str(caught.value)
+
+
+def test_an_unparseable_body_becomes_a_transport_error(posted):
+    _calls, responses = posted
+    responses.append(FakeResponse("<html>gateway error</html>"))
+    link = transport.HttpTransport("https://example.test/mcp")
+    with pytest.raises(transport.TransportError):
+        link.send("tools/list", {})
+
+
+def test_http_notify_does_not_read_a_response(posted):
+    calls, responses = posted
+    responses.append(FakeResponse("", content_type="text/plain", status=202))
+    link = transport.HttpTransport("https://example.test/mcp")
+    link.notify("notifications/initialized", {})
+    assert "id" not in calls[0]["json"]
+
+
+def test_http_has_no_stderr_and_closing_never_raises():
+    link = transport.HttpTransport("https://example.test/mcp")
+    assert link.stderr_tail() == []
+    link.close()
+    link.close()

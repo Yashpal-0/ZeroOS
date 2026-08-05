@@ -11,6 +11,8 @@ import subprocess
 import threading
 import time
 
+import httpx
+
 CALL_TIMEOUT = 120
 STDERR_LINES = 20
 
@@ -159,3 +161,80 @@ def _result_of(message: dict, method: str) -> dict:
         raise TransportError(f"The server refused {method}: {detail}")
     result = message.get("result")
     return result if isinstance(result, dict) else {}
+
+
+class HttpTransport:
+    """A remote server over Streamable HTTP.
+
+    One POST per message. If the reply is an event stream the JSON is on the
+    last `data:` line -- servers send progress notifications ahead of the
+    result, and the result is the one this client is waiting for.
+    """
+
+    def __init__(self, url: str, headers: dict | None = None) -> None:
+        self._url = url
+        self._headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            **(headers or {}),
+        }
+        self._session_id = None
+        self._client = httpx.Client(timeout=CALL_TIMEOUT)
+        self._ids = itertools.count(1)
+
+    def send(self, method: str, params: dict) -> dict:
+        request_id = next(self._ids)
+        response = self._post(
+            {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+        )
+        # Echoed on every later request to this server, per the Streamable
+        # HTTP transport. Read from the initialize reply, but taken from any
+        # reply that carries one -- a server is free to rotate it.
+        session_id = response.headers.get("Mcp-Session-Id")
+        if session_id:
+            self._session_id = session_id
+        return _result_of(_body_of(response, method), method)
+
+    def notify(self, method: str, params: dict) -> None:
+        self._post({"jsonrpc": "2.0", "method": method, "params": params})
+
+    def _post(self, message: dict):
+        headers = dict(self._headers)
+        if self._session_id:
+            headers["Mcp-Session-Id"] = self._session_id
+        try:
+            return self._client.post(self._url, json=message, headers=headers)
+        except httpx.TimeoutException as error:
+            raise TransportError("The server took too long to answer.") from error
+        except httpx.HTTPError as error:
+            raise TransportError(f"Could not reach the server: {error}") from error
+
+    def stderr_tail(self) -> list[str]:
+        """Nothing to show: a remote server's logs are the remote server's.
+        Present so mount.py never has to ask which transport it is holding."""
+        return []
+
+    def close(self) -> None:
+        try:
+            self._client.close()
+        except Exception:
+            pass
+
+
+def _body_of(response, method: str) -> dict:
+    content_type = response.headers.get("Content-Type", "")
+    text = response.text
+    if "text/event-stream" in content_type:
+        payloads = [
+            line[len("data:"):].strip()
+            for line in text.splitlines()
+            if line.startswith("data:")
+        ]
+        if not payloads:
+            raise TransportError(f"The server sent no answer to {method}.")
+        text = payloads[-1]
+    try:
+        parsed = json.loads(text)
+    except ValueError as error:
+        raise TransportError(f"The server's answer to {method} was not readable.") from error
+    return parsed if isinstance(parsed, dict) else {}
