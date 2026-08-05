@@ -79,7 +79,7 @@ def test_the_header_bar_has_a_button_that_opens_the_recall_pane(monkeypatch):
     from zeroos.surface import recall
 
     opened = []
-    monkeypatch.setattr(recall, "build", lambda parent: opened.append(parent) or _NoOpDialog())
+    monkeypatch.setattr(recall, "build", lambda parent, gate=None: opened.append(parent) or _NoOpDialog())
     chat, Gtk = _window(monkeypatch)
 
     buttons = [w for w in _walk(chat) if isinstance(w, Gtk.Button)

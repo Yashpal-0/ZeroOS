@@ -111,7 +111,7 @@ class ChatWindow(Adw.ApplicationWindow):
 
         header = Adw.HeaderBar()
         knows = Gtk.Button(icon_name="view-list-symbolic", tooltip_text="What ZeroOS knows")
-        knows.connect("clicked", lambda _b: recall.build(self).present(self))
+        knows.connect("clicked", lambda _b: recall.build(self, self._session._gate).present(self))
         header.pack_end(knows)
 
         layout = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)

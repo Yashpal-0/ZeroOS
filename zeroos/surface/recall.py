@@ -12,6 +12,9 @@ Adw.PreferencesRow:use-markup defaults to TRUE — so every row carrying that
 text sets use_markup=False explicitly. Not enabling it is not enough.
 """
 
+import shlex
+import threading
+
 import gi
 
 gi.require_version("Adw", "1")
@@ -19,6 +22,8 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gtk  # noqa: E402
 
 from zeroos.agent import history  # noqa: E402
+from zeroos.mcp import config as mcp_config  # noqa: E402
+from zeroos.mcp import mount  # noqa: E402
 from zeroos.platform import memory, settings  # noqa: E402
 
 _ADDRESS_LABELS = {"sir": "Sir", "maam": "Ma'am", "none": "No title"}
@@ -49,8 +54,9 @@ def choose_address(value: str) -> None:
     settings.set_address(value)
 
 
-def build(parent) -> Adw.PreferencesDialog:
+def build(parent, gate=None) -> Adw.PreferencesDialog:
     dialog = Adw.PreferencesDialog(title="What ZeroOS knows")
+    dialog._gate = gate
     _fill(dialog)
     return dialog
 
@@ -63,6 +69,7 @@ def _fill(dialog) -> None:
     page.add(_memory_group(dialog))
     page.add(_history_group(dialog))
     page.add(_settings_group(dialog))
+    page.add(_servers_group(dialog))
     dialog.add(page)
     dialog._page = page
 
@@ -216,3 +223,123 @@ def _on_confirmed(dialog, action, response: str) -> None:
         return
     action()
     _redraw(dialog)
+
+
+def add_server(entry: dict, gate) -> threading.Thread:
+    """Write one server and remount. Like everything in this pane, it does not
+    pass through the gate: recall.py:7-8's asymmetry holds, this is the user
+    acting rather than the model. Correspondingly there is no add_server tool
+    in the catalog and there will not be one.
+    """
+    valid, _ = mcp_config.load()
+    mcp_config.save([e for e in valid if e["name"] != entry["name"]] + [entry])
+    return _remount(gate)
+
+
+def remove_server(name: str, gate) -> threading.Thread:
+    valid, _ = mcp_config.load()
+    mcp_config.save([entry for entry in valid if entry["name"] != name])
+    return _remount(gate)
+
+
+def _remount(gate) -> threading.Thread:
+    """Off the main thread, for the reason spec section 5 gives: a dead remote
+    server costs 120 seconds, and this runs from a button press.
+
+    The thread is returned so a test can join it rather than sleep on it.
+    """
+    thread = threading.Thread(target=lambda: mount.load(gate), daemon=True)
+    thread.start()
+    return thread
+
+
+def _servers_group(dialog) -> Adw.PreferencesGroup:
+    group = Adw.PreferencesGroup(
+        title="Servers",
+        description="Extra tools ZeroOS can use. Everything a server offers asks before it runs.",
+    )
+    valid, skipped = mcp_config.load()
+    states = {record["name"]: record for record in mount.status()}
+    entries = [(entry["name"], states.get(entry["name"])) for entry in valid]
+    entries += [(entry["name"], _skipped_record(entry)) for entry in skipped]
+
+    if not entries:
+        group.add(Adw.ActionRow(title="No servers yet.", use_markup=False))
+    for name, record in entries:
+        # use_markup=False on every row carrying a server-supplied string, for
+        # the reason recall.py:10-12 already gives: it defaults to True, and a
+        # status wrapped in <span> would render invisible in the screen that
+        # exists so the user can remove the server.
+        row = Adw.ActionRow(title=name, subtitle=_status_line(record), use_markup=False)
+        row.set_property("title-lines", 0)
+        row.set_property("subtitle-lines", 0)
+        button = Gtk.Button(icon_name="user-trash-symbolic", valign=Gtk.Align.CENTER)
+        button.connect("clicked", lambda _b, n=name: _remove_row(dialog, n))
+        row.add_suffix(button)
+        group.add(row)
+    group.add(_add_server_row(dialog))
+    return group
+
+
+def _skipped_record(entry: dict) -> dict:
+    return {"state": "failed", "tools": 0, "error": entry["reason"], "stderr": []}
+
+
+def _status_line(record) -> str:
+    if record is None:
+        # mount.load() runs off the main thread, so a pane opened during
+        # startup has a configured server and no record for it yet.
+        return "Connecting…"
+    if record["state"] == "connected":
+        count = record["tools"]
+        return f"Connected — {count} tool" + ("" if count == 1 else "s")
+    detail = record.get("error", "")
+    tail = " ".join(record.get("stderr", []))
+    return f"Not working — {detail} {tail}".strip()
+
+
+def _remove_row(dialog, name: str) -> None:
+    remove_server(name, dialog._gate)
+    _redraw(dialog)
+
+
+def _add_server_row(dialog) -> Adw.ActionRow:
+    """A footer row that opens a three-field alert to add a server."""
+    row = Adw.ActionRow(
+        activatable=True, title="Add a server", use_markup=False,
+        subtitle="Name, command or URL.",
+    )
+    row.connect("activated", lambda _r: _add_server_dialog(dialog))
+    return row
+
+
+def _add_server_dialog(dialog) -> None:
+    alert = Adw.AlertDialog(heading="Add a server")
+    alert.add_response("cancel", "Cancel")
+    alert.add_response("add", "Add")
+    alert.set_default_response("cancel")
+    alert.set_close_response("cancel")
+
+    name = Adw.EntryRow(title="Name")
+    command = Adw.EntryRow(title="Command (e.g. npx -y @mcp/server)")
+    url = Adw.EntryRow(title="URL (https://…)")
+    for entry_row in (name, command, url):
+        alert.set_extra_child(entry_row)
+
+    def _on_response(_a, response):
+        if response != "add":
+            return
+        entry = {"name": name.get_text().strip()}
+        cmd = command.get_text().strip()
+        link = url.get_text().strip()
+        if cmd:
+            entry["command"] = shlex.split(cmd)
+        elif link:
+            entry["url"] = link
+        else:
+            return
+        add_server(entry, dialog._gate)
+        _redraw(dialog)
+
+    alert.connect("response", _on_response)
+    alert.present(dialog)

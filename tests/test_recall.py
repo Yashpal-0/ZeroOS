@@ -9,6 +9,7 @@ from gi.repository import Adw, Gtk  # noqa: E402
 import pytest  # noqa: E402
 
 from zeroos.agent import history  # noqa: E402
+from zeroos.mcp import config, mount  # noqa: E402
 from zeroos.platform import memory, settings  # noqa: E402
 from zeroos.surface import recall  # noqa: E402
 
@@ -215,6 +216,114 @@ def test_picking_a_form_of_address_in_the_combo_persists_it():
     combo.set_selected(settings.ADDRESSES.index("none"))
 
     assert settings.address() == "none"
+
+
+# --- Servers pane (v0.3, Task 10) ---
+
+
+class _FakeDialog:
+    """A bare object the servers group can attach to. _servers_group only reads
+    dialog for the redraw closure the button callbacks capture; building the
+    group never triggers one."""
+
+
+def _titles(group) -> list[str]:
+    return [r.get_title() for r in widgets(group, Adw.ActionRow)]
+
+
+def _subtitles(group) -> list[str]:
+    return [r.get_subtitle() for r in widgets(group, Adw.ActionRow)]
+
+
+def _rows(group) -> list[Adw.ActionRow]:
+    return widgets(group, Adw.ActionRow)
+
+
+def test_each_configured_server_is_listed_with_its_status(monkeypatch):
+    config.save([{"name": "filesystem", "command": ["npx", "pkg"]}])
+    monkeypatch.setattr(
+        recall.mount,
+        "status",
+        lambda: [{"name": "filesystem", "state": "connected", "tools": 3, "error": "", "stderr": []}],
+    )
+    group = recall._servers_group(_FakeDialog())
+    titles = _titles(group)
+    assert "filesystem" in titles
+    assert "3" in _subtitles(group)[titles.index("filesystem")]
+
+
+def test_a_server_with_no_status_yet_reads_as_connecting(monkeypatch):
+    """mount.load() runs off the main thread, so a pane opened during startup
+    has a configured server and no record for it yet."""
+    config.save([{"name": "filesystem", "command": ["npx", "pkg"]}])
+    monkeypatch.setattr(recall.mount, "status", lambda: [])
+    group = recall._servers_group(_FakeDialog())
+    assert "Connecting" in _subtitles(group)[0]
+
+
+def test_a_failed_server_shows_its_error_and_stderr(monkeypatch):
+    config.save([{"name": "broken", "url": "https://example.test"}])
+    monkeypatch.setattr(
+        recall.mount,
+        "status",
+        lambda: [{"name": "broken", "state": "failed", "tools": 0,
+                  "error": "Could not reach the server", "stderr": ["npx: not found"]}],
+    )
+    subtitle = _subtitles(recall._servers_group(_FakeDialog()))[0]
+    assert "Could not reach the server" in subtitle
+    assert "npx: not found" in subtitle
+
+
+def test_a_server_name_carrying_markup_renders_literally(monkeypatch):
+    """recall.py:10-12: Adw.PreferencesRow:use-markup defaults to TRUE, and a
+    status wrapped in <span> would render invisible in the screen that exists
+    so the user can remove the server."""
+    config.save([{"name": "evil", "url": "https://example.test"}])
+    monkeypatch.setattr(
+        recall.mount,
+        "status",
+        lambda: [{"name": "evil", "state": "failed", "tools": 0,
+                  "error": "<span foreground='white'>nothing wrong</span>", "stderr": []}],
+    )
+    for row in _rows(recall._servers_group(_FakeDialog())):
+        assert row.get_use_markup() is False
+
+
+def test_removing_a_server_rewrites_the_file(monkeypatch):
+    config.save([
+        {"name": "a", "url": "https://example.test"},
+        {"name": "b", "url": "https://example.test"},
+    ])
+    monkeypatch.setattr(recall.mount, "load", lambda *a, **k: None)
+    recall.remove_server("a", None)
+    assert [entry["name"] for entry in config.load()[0]] == ["b"]
+
+
+def test_adding_a_server_writes_it_and_remounts(monkeypatch):
+    reloaded = []
+    monkeypatch.setattr(recall.mount, "load", lambda *a, **k: reloaded.append(True))
+    recall.add_server({"name": "new", "command": ["npx", "pkg"]}, None).join()
+    assert [entry["name"] for entry in config.load()[0]] == ["new"]
+    assert reloaded == [True]
+
+
+def test_the_group_survives_an_unreadable_config(monkeypatch):
+    config.path().parent.mkdir(parents=True, exist_ok=True)
+    config.path().write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(recall.mount, "status", lambda: [])
+    group = recall._servers_group(_FakeDialog())
+    assert _titles(group) != []  # the empty-state row, not a crash
+
+
+def test_a_config_entry_the_loader_rejected_is_still_listed(monkeypatch):
+    """Spec section 3: the reason is shown in the pane. An entry the user
+    hand-edited wrongly must not vanish without explanation."""
+    config.path().parent.mkdir(parents=True, exist_ok=True)
+    config.path().write_text(
+        '{"servers": [{"name": "bad", "command": "npx -y pkg"}]}', encoding="utf-8"
+    )
+    monkeypatch.setattr(recall.mount, "status", lambda: [])
+    assert "bad" in _titles(recall._servers_group(_FakeDialog()))
 
 
 def switch_for(dialog, title):
