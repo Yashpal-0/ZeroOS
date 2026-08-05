@@ -1,6 +1,6 @@
 import pytest
 
-from zeroos.policy.tiers import PATH_ARGUMENTS, TIERS, Tier, tier_of
+from zeroos.policy.tiers import MCP_PREFIX, PATH_ARGUMENTS, TIERS, Tier, tier_of
 
 EXPECTED_AUTO = {
     "list_apps",
@@ -70,3 +70,30 @@ def test_run_command_has_no_sandboxed_path_argument():
     """Spec section 8: it cannot have one. A command line has no path argument
     to resolve, and a shell can construct one at runtime from anything."""
     assert "run_command" not in PATH_ARGUMENTS
+
+
+def test_any_mcp_name_is_confirm():
+    assert tier_of("mcp__filesystem__read_file") is Tier.CONFIRM
+    assert tier_of("mcp__anything__at__all") is Tier.CONFIRM
+
+
+def test_the_prefix_branch_does_not_touch_TIERS():
+    """Spec section 7: no mount-time write to module state, so
+    test_registry.py's three-place rule keeps meaning what it means."""
+    before = dict(TIERS)
+    tier_of("mcp__filesystem__read_file")
+    assert TIERS == before
+
+
+def test_an_unknown_non_mcp_name_still_raises():
+    with pytest.raises(KeyError):
+        tier_of("definitely_not_a_tool")
+
+
+def test_a_name_that_only_resembles_the_prefix_still_raises():
+    with pytest.raises(KeyError):
+        tier_of("mcp_filesystem_read")
+
+
+def test_the_prefix_is_two_underscores():
+    assert MCP_PREFIX == "mcp__"

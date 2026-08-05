@@ -48,6 +48,19 @@ PATH_ARGUMENTS: dict[str, tuple[str, ...]] = {
 }
 
 
+MCP_PREFIX = "mcp__"
+
+
 def tier_of(name: str) -> Tier:
-    """Look up a tool's tier. Unknown tools raise: fail closed, never open."""
+    """Look up a tool's tier. Unknown tools raise: fail closed, never open.
+
+    Every MCP tool is CONFIRM, resolved by prefix rather than by a mount-time
+    write to TIERS. Three properties that buys, all deliberate: TIERS is never
+    mutated, so test_registry.py's three-place rule keeps meaning what it
+    means; unknown non-MCP names still raise; and the prefix is ours -- mount.py
+    composes it from a name config.py validated, out of a file the model cannot
+    write, so a server cannot name itself into or out of a tier.
+    """
+    if name.startswith(MCP_PREFIX):
+        return Tier.CONFIRM
     return TIERS[name]
