@@ -730,3 +730,18 @@ def test_a_close_during_a_turn_skips_the_summary_but_still_records(home, monkeyp
     # own failures, so a summary that did run would leave no other trace here.
     assert len(client.requests) == before, "the closing pass must not be sent"
     assert recorded == [1], "the usage line must be written even with no summary"
+
+
+def test_the_memory_block_ends_with_the_format_reminder(home):
+    """The fact block used to be the last thing the model read, and the format
+    rule lost to it on recency: a populated store turned one-sentence replies
+    into markdown dumps. The block now ends by restating the rule."""
+    from zeroos.agent.prompt import MEMORY_CLOSING
+    from zeroos.platform import memory
+
+    memory.add("Yash keeps tax PDFs in Documents")
+    session, _, client = build_session([FakeMessage(content="hello")], [])
+    session.send("hi")
+    block = system_messages(client.requests[0])[1]["content"]
+    assert block.endswith(MEMORY_CLOSING)
+    assert block.index("Yash keeps tax PDFs") < block.index(MEMORY_CLOSING)

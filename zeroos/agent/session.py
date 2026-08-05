@@ -15,7 +15,7 @@ from typing import Callable
 import openai
 
 from zeroos.agent import history, log, notice, usage
-from zeroos.agent.prompt import MEMORY_PREFACE, PROMPTS
+from zeroos.agent.prompt import MEMORY_CLOSING, MEMORY_PREFACE, PROMPTS
 from zeroos.catalog.registry import build
 from zeroos.platform import memory, settings
 from zeroos.policy.describe import describe_batch
@@ -264,7 +264,8 @@ class Session:
         if not facts:
             return []
         lines = "\n".join(f"[{f['id']}] {f['text']}" for f in facts)
-        return [{"role": "system", "content": f"{MEMORY_PREFACE}\n\n{lines}"}]
+        block = f"{MEMORY_PREFACE}\n\n{lines}\n\n{MEMORY_CLOSING}"
+        return [{"role": "system", "content": block}]
 
     def _offer_candidates(self) -> None:
         """Put the previous turn's candidates through the ordinary dialog.

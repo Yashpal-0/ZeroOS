@@ -169,3 +169,18 @@ def test_editing_the_preface_cannot_move_the_first_system_message():
     # section 3 adds. (Criterion 4 also said "byte-identical to v0.1's" until
     # the persona ruling of 2026-08-04 replaced the prompt text.)
     assert prompt.MEMORY_PREFACE not in prompt.SYSTEM_PROMPT
+
+
+def test_the_preface_says_who_I_means():
+    # Facts already in the store are first person and are not migrated -- a
+    # mechanical pronoun rewrite cannot be done without changing meaning. This
+    # line is what makes them readable.
+    from zeroos.agent.prompt import MEMORY_PREFACE
+
+    assert "'I' in a fact means the user, not you." in MEMORY_PREFACE
+
+
+def test_the_closing_line_restates_the_reply_format():
+    from zeroos.agent.prompt import MEMORY_CLOSING
+
+    assert "one sentence" in MEMORY_CLOSING
