@@ -166,9 +166,10 @@ def _result_of(message: dict, method: str) -> dict:
 class HttpTransport:
     """A remote server over Streamable HTTP.
 
-    One POST per message. If the reply is an event stream the JSON is on the
-    last `data:` line -- servers send progress notifications ahead of the
-    result, and the result is the one this client is waiting for.
+    One POST per message. A reply is either a single JSON object or an SSE
+    stream carrying several frames -- notifications and the result can
+    arrive in any order, so the answer is picked out by JSON-RPC id, not by
+    position on the wire.
     """
 
     def __init__(self, url: str, headers: dict | None = None) -> None:
@@ -188,15 +189,9 @@ class HttpTransport:
 
     def send(self, method: str, params: dict) -> dict:
         request_id = next(self._ids)
-        text, headers, status_code = self._post(
+        text, headers, _status_code = self._post(
             {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
         )
-        if status_code >= 400:
-            # Status only, never the body or the URL: MCP servers commonly
-            # authenticate by query parameter, and this client's own config
-            # accepts any URL, so an interpolated error/URL can carry a
-            # token straight into the pane or a model prompt.
-            raise TransportError(f"The server refused {method} ({status_code}).")
         # Echoed on every later request to this server, per the Streamable
         # HTTP transport. Read from the initialize reply, but taken from any
         # reply that carries one -- a server is free to rotate it.
@@ -218,7 +213,13 @@ class HttpTransport:
         # small chunks (SSE keep-alives, slow progress notifications) can
         # hold a plain .post() open indefinitely. The loop below enforces a
         # real wall-clock deadline across the whole read, the way
-        # StdioTransport._await bounds its wait.
+        # StdioTransport._await bounds its wait -- except this one is soft:
+        # it's only checked after a chunk arrives, so the final blocking
+        # read can still overshoot by a full read timeout (worst case
+        # ~2x CALL_TIMEOUT). StdioTransport's deadline is hard because it
+        # can pass the remaining time straight to queue.get; sync httpx has
+        # no equivalent whole-call bound, so the two transports differ here
+        # by necessity, not oversight.
         deadline = time.monotonic() + CALL_TIMEOUT
         try:
             with self._client.stream("POST", self._url, json=message, headers=headers) as response:
@@ -226,19 +227,35 @@ class HttpTransport:
                     # A notification's reply is a status line, nothing more
                     # -- reading the body would wait on a stream a server is
                     # free to hold open, which is exactly I1's failure mode.
-                    return "", response.headers, response.status_code
-                chunks = []
-                for chunk in response.iter_text():
-                    chunks.append(chunk)
-                    if time.monotonic() > deadline:
-                        raise TransportError("The server took too long to answer.")
-                return "".join(chunks), response.headers, response.status_code
+                    text = ""
+                else:
+                    chunks = []
+                    for chunk in response.iter_text():
+                        chunks.append(chunk)
+                        if time.monotonic() > deadline:
+                            raise TransportError("The server took too long to answer.")
+                    text = "".join(chunks)
+                if response.status_code >= 400:
+                    # Status only, never the body or the URL: MCP servers
+                    # commonly authenticate by query parameter, and this
+                    # client's own config accepts any URL, so an
+                    # interpolated error/URL can carry a token straight into
+                    # the pane or a model prompt. Checked here so notify
+                    # gets it too, not just send.
+                    raise TransportError(f"The server refused {message['method']} ({response.status_code}).")
+                return text, response.headers, response.status_code
+        except TransportError:
+            raise
         except httpx.TimeoutException as error:
             raise TransportError("The server took too long to answer.") from error
-        except (httpx.HTTPError, httpx.InvalidURL) as error:
-            # InvalidURL is not an HTTPError in httpx 0.28 -- a malformed
-            # authority (typo'd port, etc.) in a hand-edited server config
-            # must not escape as a bare httpx exception either.
+        except Exception as error:
+            # Broad on purpose: httpx doesn't wrap everything that can go
+            # wrong in HTTPError/InvalidURL -- an over-long hostname label,
+            # for one, surfaces as a bare UnicodeEncodeError from the idna
+            # codec deep inside httpcore. Anything reaching this line is a
+            # local/network failure, not a JSON-RPC one, so it's always
+            # this message. The re-raise above keeps this clause from
+            # relabelling this method's own TransportError as this one.
             raise TransportError(f"Could not reach the server: {error}") from error
 
     def stderr_tail(self) -> list[str]:
@@ -301,6 +318,14 @@ def _select_frame(text: str, content_type: str, method: str, request_id: int) ->
 
     for frame in reversed(frames):
         if frame.get("id") == request_id:
+            return frame
+
+    # A parse/invalid-request error has no request to carry the id of --
+    # JSON-RPC puts "id": null on it instead. Falling back to it here is
+    # what keeps the server's own explanation ("bad request", "unauthorised")
+    # alive instead of collapsing into the generic "no answer" below.
+    for frame in reversed(frames):
+        if frame.get("id") is None and "error" in frame:
             return frame
 
     if not frames:

@@ -351,6 +351,11 @@ def test_a_network_failure_becomes_a_transport_error(monkeypatch):
 
 
 def test_an_http_timeout_says_so(monkeypatch):
+    """Also the regression guard for the broad `except Exception` added in
+    round 2: TimeoutException must still be caught by its own clause and
+    keep this wording, not fall through and get relabelled "Could not reach
+    the server" -- which only holds if that clause is checked first."""
+
     def slow(self, method, url, **kwargs):
         raise transport.httpx.TimeoutException("slow")
 
@@ -371,6 +376,18 @@ def test_a_malformed_url_becomes_a_transport_error_not_a_bare_httpx_exception():
     assert "SECRET" not in str(caught.value)
 
 
+def test_an_over_long_hostname_label_becomes_a_transport_error_too():
+    """C1 residual: httpx doesn't wrap everything in HTTPError/InvalidURL --
+    an over-long hostname label surfaces as a bare UnicodeEncodeError from
+    the idna codec deep inside httpcore. Catching that requires a broad
+    except Exception, so this is also what proves the broadening didn't
+    swallow anything it shouldn't. No mocking: fails before any I/O."""
+    link = transport.HttpTransport(f"http://{'a' * 300}.test/mcp", {"Authorization": "Bearer SECRET"})
+    with pytest.raises(transport.TransportError) as caught:
+        link.send("tools/list", {})
+    assert "SECRET" not in str(caught.value)
+
+
 def test_a_json_rpc_error_over_http_becomes_a_transport_error(streamed):
     _calls, responses = streamed
     responses.append(
@@ -382,6 +399,23 @@ def test_a_json_rpc_error_over_http_becomes_a_transport_error(streamed):
     with pytest.raises(transport.TransportError) as caught:
         link.send("tools/list", {})
     assert "unauthorised" in str(caught.value)
+
+
+def test_an_id_null_error_frame_is_used_when_nothing_matches_the_request_id(streamed):
+    """A parse/invalid-request JSON-RPC error carries "id": null, not the
+    request's id, since it has no valid request to attach to -- it must
+    still surface its detail rather than collapsing into the generic
+    "no answer" message."""
+    _calls, responses = streamed
+    responses.append(
+        FakeStreamResponse(
+            json.dumps({"jsonrpc": "2.0", "id": None, "error": {"message": "bad request"}})
+        )
+    )
+    link = transport.HttpTransport("https://example.test/mcp")
+    with pytest.raises(transport.TransportError) as caught:
+        link.send("tools/list", {})
+    assert "bad request" in str(caught.value)
 
 
 def test_an_unparseable_body_becomes_a_transport_error(streamed):
@@ -415,6 +449,18 @@ def test_a_non_2xx_status_becomes_a_transport_error_without_leaking_the_url_or_b
     assert "invalid token" not in message
 
 
+def test_http_notify_against_a_non_2xx_status_becomes_a_transport_error(streamed):
+    """The status check moved into _post so both callers get it -- an
+    expired token must not make notify (the handshake's step 2) fail
+    silently just because nothing currently reads its return value."""
+    _calls, responses = streamed
+    responses.append(FakeStreamResponse("", content_type="text/plain", status=401))
+    link = transport.HttpTransport("https://example.test/mcp")
+    with pytest.raises(transport.TransportError) as caught:
+        link.notify("notifications/initialized", {})
+    assert "401" in str(caught.value)
+
+
 def test_http_notify_sends_a_frame_with_no_id(streamed):
     calls, responses = streamed
     responses.append(FakeStreamResponse("", content_type="text/plain", status=202))
@@ -437,10 +483,14 @@ def test_http_notify_returns_without_waiting_for_the_body(monkeypatch):
 
     def serve():
         conn, _ = server.accept()
-        conn.recv(65536)
-        conn.sendall(b"HTTP/1.1 202 Accepted\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n")
-        stop.wait(5)  # holds the body open -- a server that never finishes it
-        conn.close()
+        try:
+            conn.recv(65536)
+            conn.sendall(b"HTTP/1.1 202 Accepted\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n")
+            stop.wait(5)  # holds the body open -- a server that never finishes it
+        except OSError:
+            pass
+        finally:
+            conn.close()
 
     thread = threading.Thread(target=serve, daemon=True)
     thread.start()
@@ -452,7 +502,8 @@ def test_http_notify_returns_without_waiting_for_the_body(monkeypatch):
     finally:
         stop.set()
         server.close()
-        thread.join(timeout=1)
+        thread.join(timeout=2)
+        assert not thread.is_alive()  # a stuck server thread must not pass silently
 
 
 def test_a_slow_drip_is_bounded_by_call_timeout_not_left_hanging(monkeypatch):
@@ -469,17 +520,23 @@ def test_a_slow_drip_is_bounded_by_call_timeout_not_left_hanging(monkeypatch):
 
     def serve():
         conn, _ = server.accept()
-        conn.recv(65536)
-        conn.sendall(
-            b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n"
-        )
-        while not stop.is_set():
-            try:
+        try:
+            conn.recv(65536)
+            conn.sendall(
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n"
+            )
+            # Self-bounded: if the client's deadline check ever regresses,
+            # this test must fail (send() returns normally once the server
+            # gives up and closes), not hang -- there's no pytest-timeout in
+            # this suite to rescue a stuck read.
+            giving_up_at = time.monotonic() + 5
+            while not stop.is_set() and time.monotonic() < giving_up_at:
                 conn.sendall(b": keep-alive\n\n")
-            except OSError:
-                return
-            stop.wait(0.3)
-        conn.close()
+                stop.wait(0.3)
+        except OSError:
+            pass
+        finally:
+            conn.close()
 
     thread = threading.Thread(target=serve, daemon=True)
     thread.start()
@@ -494,7 +551,8 @@ def test_a_slow_drip_is_bounded_by_call_timeout_not_left_hanging(monkeypatch):
     finally:
         stop.set()
         server.close()
-        thread.join(timeout=1)
+        thread.join(timeout=2)
+        assert not thread.is_alive()  # a stuck server thread must not pass silently
 
 
 def test_http_has_no_stderr_and_closing_never_raises():
