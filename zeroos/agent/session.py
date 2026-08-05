@@ -120,6 +120,13 @@ class Session:
         # not re-offering it is equally right. Dies with the session; a fresh
         # one may raise the same fact again, and nothing reaches disk.
         self._offered: set[str] = set()
+        # How much of _messages the last noticing pass has already read. The
+        # pass costs a reasoning-model call per turn, and sending the whole
+        # accumulated transcript makes turn 40 pay to re-read the first 39 --
+        # a cost that grows with a conversation rather than with what was said
+        # in it. The closing summary in close() deliberately ignores this: it
+        # runs once, and its job is the session as a whole.
+        self._noticed = 0
 
     def send(self, text: str, on_event=None) -> str:
         """Run one turn to completion and return the model's final text.
@@ -181,7 +188,8 @@ class Session:
         # open before this returns: window.py renders the reply only after
         # send() comes back, and ask blocks until answered, so a dialog here
         # would ask about facts drawn from a reply the user has not seen.
-        self._pending = notice.candidates(self._client, self._messages)
+        self._pending = notice.candidates(self._client, self._messages[self._noticed:])
+        self._noticed = len(self._messages)
         if on_event:
             on_event("done", reply)
         return reply

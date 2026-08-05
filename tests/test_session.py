@@ -813,3 +813,44 @@ def test_a_fact_outside_the_block_is_unreachable_by_conversation(home):
     block = system_messages(client.requests[0])[1]["content"]
     assert buried not in block
     assert memory.text_of(buried) == "Yash keeps tax PDFs in Documents"
+
+
+def test_the_noticing_pass_reads_only_what_is_new(home):
+    """Per-turn noticing cost must be flat. Sending the accumulated transcript
+    means turn 40 pays to re-read the first 39, on a reasoning model, forever."""
+    responses = [
+        FakeMessage(content="first reply"),
+        FakeMessage(content=""),   # turn 1's noticing pass
+        FakeMessage(content="second reply"),
+        FakeMessage(content=""),   # turn 2's noticing pass
+    ]
+    session, _, client = build_session(responses, [])
+    session.send("ask about the first thing")
+    session.send("ask about the second thing")
+
+    # Noticing requests carry no tools; the turn's own calls do.
+    noticing = [r for r in client.requests if "tools" not in r]
+    assert len(noticing) == 2
+    sent = str(noticing[1]["messages"])
+    assert "ask about the second thing" in sent
+    assert "ask about the first thing" not in sent
+
+
+def test_the_closing_summary_still_reads_the_whole_conversation(home):
+    """It runs once, at shutdown, and its job is what the session was about."""
+    responses = [
+        FakeMessage(content="first reply"),
+        FakeMessage(content=""),
+        FakeMessage(content="second reply"),
+        FakeMessage(content=""),
+        FakeMessage(content=""),   # the closing pass
+    ]
+    session, _, client = build_session(responses, [])
+    session.send("ask about the first thing")
+    session.send("ask about the second thing")
+    session.close()
+
+    noticing = [r for r in client.requests if "tools" not in r]
+    sent = str(noticing[-1]["messages"])
+    assert "ask about the first thing" in sent
+    assert "ask about the second thing" in sent
