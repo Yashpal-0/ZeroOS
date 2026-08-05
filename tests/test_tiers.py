@@ -23,11 +23,12 @@ EXPECTED_CONFIRM = {
     "trash_file",
     "remember",
     "forget",
+    "run_command",
 }
 
 
-def test_there_are_exactly_eighteen_tools():
-    assert len(TIERS) == 18
+def test_there_are_exactly_nineteen_tools():
+    assert len(TIERS) == 19
 
 
 def test_auto_tier_matches_the_spec():
@@ -59,3 +60,13 @@ def test_sandboxed_arguments_match_the_spec():
         "move_file": ("source", "destination"),
         "trash_file": ("path",),
     }
+
+
+def test_run_command_is_confirm_tier():
+    assert tier_of("run_command") is Tier.CONFIRM
+
+
+def test_run_command_has_no_sandboxed_path_argument():
+    """Spec section 8: it cannot have one. A command line has no path argument
+    to resolve, and a shell can construct one at runtime from anything."""
+    assert "run_command" not in PATH_ARGUMENTS

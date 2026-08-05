@@ -166,3 +166,34 @@ def test_a_remember_row_truncates_at_the_store_cap_not_a_fixed_number():
     row = describe.describe_batch([("remember", {"text": "x" * (memory.MAX_CHARS + 50)})])[0]
     assert "x" * memory.MAX_CHARS in row
     assert row.endswith('…"')
+
+
+def test_the_run_command_row_shows_the_command_on_its_own_line():
+    row = describe.describe_batch([("run_command", {"command": "ls -la ~/Documents"})])[0]
+    assert row == "Run this command on your computer:\n  ls -la ~/Documents"
+
+
+def test_a_long_command_is_not_truncated():
+    """Spec section 6: this is the one uncapped row in the application. A
+    truncated command is a command whose tail the user approved without
+    seeing, and the tail is where `&& rm -rf ~` goes."""
+    command = "echo " + "a" * 5_000 + " && rm -rf ~/Documents"
+    row = describe.describe_batch([("run_command", {"command": command})])[0]
+    assert command in row
+    assert "…" not in row
+
+
+def test_a_multi_line_command_keeps_its_newlines():
+    command = "cd ~/Work\nmake clean\nmake all"
+    row = describe.describe_batch([("run_command", {"command": command})])[0]
+    assert "cd ~/Work\nmake clean\nmake all" in row
+
+
+def test_control_characters_in_a_command_are_stripped():
+    row = describe.describe_batch([("run_command", {"command": "ls\x1b[2Jrm -rf ~"})])[0]
+    assert "\x1b" not in row
+    assert "ls[2Jrm -rf ~" in row
+
+
+def test_a_missing_command_argument_does_not_raise():
+    assert isinstance(describe.describe_batch([("run_command", {})])[0], str)

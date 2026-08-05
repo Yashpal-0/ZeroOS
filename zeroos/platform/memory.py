@@ -47,10 +47,21 @@ def path() -> Path:
     return paths.data_dir() / "memory.jsonl"
 
 
+def strip_control(text: str) -> str:
+    """Delete control characters, leave whitespace alone.
+
+    normalise() collapses whitespace as well; callers that must preserve
+    line structure -- the run_command consent row, spec section 6 -- take
+    this half on its own. A command that reads as one line in the dialog
+    but runs as three is a row that lies.
+    """
+    return str(text).translate(_STRIP)
+
+
 def normalise(text: str) -> str:
     """Collapse whitespace, strip control characters. Runs before the length
     check, so the characters counted are the characters displayed."""
-    return " ".join(str(text).translate(_STRIP).split())
+    return " ".join(strip_control(text).split())
 
 
 def load() -> list[dict]:

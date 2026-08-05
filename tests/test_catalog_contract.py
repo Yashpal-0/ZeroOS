@@ -13,6 +13,7 @@ from zeroos.catalog import files as catalog_files
 from zeroos.catalog import openers as catalog_openers
 from zeroos.catalog import system as catalog_system
 from zeroos.catalog import registry
+from zeroos.platform import shell as platform_shell
 from zeroos.policy import gate as gate_module
 from zeroos.policy.tiers import PATH_ARGUMENTS
 
@@ -23,7 +24,7 @@ _WRONG_TYPE = {"string": 12345, "integer": "not an int", "number": "not a number
 
 @pytest.fixture
 def tools(tmp_path, monkeypatch):
-    """The full sixteen-tool catalog, with every system-touching seam stubbed.
+    """The full nineteen-tool catalog, with every system-touching seam stubbed.
 
     Hostile arguments like "" resolve *inside* the sandbox (to its root), so
     file tools aren't safe to leave live here the way test_catalog_files.py
@@ -45,6 +46,7 @@ def tools(tmp_path, monkeypatch):
     monkeypatch.setattr(catalog_files.platform_files, "copy", lambda s, d: None)
     monkeypatch.setattr(catalog_files.platform_files, "move", lambda s, d: None)
     monkeypatch.setattr(catalog_files.platform_files, "trash", lambda p: None)
+    monkeypatch.setattr(platform_shell, "run", lambda command: "exit 0")
     gate = gate_module.Gate(lambda rows: [True] * len(rows))
     return registry.build(gate)
 
@@ -77,7 +79,7 @@ def _hostile_calls(properties, path_shaped):
 
 def test_no_tool_ever_raises_on_hostile_arguments(tools):
     # test_registry.py owns this count; asserted here so a miscount can't silently shrink what this test covers.
-    assert len(tools) == 18
+    assert len(tools) == 19
     for tool in tools:
         path_shaped = set(PATH_ARGUMENTS.get(tool.name, ()))
         for arguments in _hostile_calls(tool.input_schema["properties"], path_shaped):

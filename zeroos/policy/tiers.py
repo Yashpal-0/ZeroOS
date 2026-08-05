@@ -32,6 +32,7 @@ TIERS: dict[str, Tier] = {
     "trash_file": Tier.CONFIRM,
     "remember": Tier.CONFIRM,
     "forget": Tier.CONFIRM,
+    "run_command": Tier.CONFIRM,
 }
 
 PATH_ARGUMENTS: dict[str, tuple[str, ...]] = {

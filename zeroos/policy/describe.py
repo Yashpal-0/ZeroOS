@@ -6,6 +6,7 @@ Spec section 4.4: folder names not paths, counts not lists, no jargon.
 from pathlib import Path
 
 from zeroos.platform import memory, paths
+from zeroos.platform.memory import strip_control
 
 TRASH_REASSURANCE = (
     "Files moved to the trash can be restored. ZeroOS never permanently deletes anything."
@@ -48,6 +49,22 @@ def _for_display(text: str) -> str:
 
 
 def _single(tool: str, args: dict) -> str:
+    if tool == "run_command":
+        # The one uncapped row in the application. _for_display is deliberately
+        # not applied: the MCP cap below exists so a large argument blob cannot
+        # swamp the dialog, but here the opposite risk governs -- a truncated
+        # command is a command whose tail the user approved without seeing, and
+        # the tail is where `&& rm -rf ~` goes. Measured at the 2026-08-04 caps
+        # (dialog.py:48-52), a 1,012-character row renders 1,144 px tall in a
+        # 304 px scrolled viewport with nothing truncated. Long commands make
+        # the user scroll. That is the intended cost.
+        #
+        # strip_control, not normalise: newlines are preserved, because a
+        # command that reads as one line here but runs as three is a row that
+        # lies. Control characters go, so a command cannot repaint the dialog
+        # around itself.
+        command = strip_control(args.get("command", ""))
+        return f"Run this command on your computer:\n  {command}"
     if tool == "create_folder":
         return f"Create a folder called {_name(args['path'])} in {_folder(args['path'])}"
     if tool == "write_text_file":

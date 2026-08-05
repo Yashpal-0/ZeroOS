@@ -21,6 +21,17 @@ _JSON_TYPES = {str: "string", int: "integer", float: "number", bool: "boolean"}
 # traceback goes to the action log (Task 11) for us, not to the model.
 _UNEXPECTED = "That didn't work."
 
+# A tool result the model has to read back. 40,000 characters is ~10k tokens
+# against a 65,536 MAX_TOKENS window. The marker is explicit so the model
+# narrows and retries rather than reasoning off a result it does not know
+# was cut. Shared with mcp/remote.py, which caps server results the same way.
+MAX_RESULT = 40_000
+_CUT = "\n\n[cut off at 40,000 characters. Narrow the request and try again.]"
+
+
+def cap(text: str) -> str:
+    return text if len(text) <= MAX_RESULT else text[:MAX_RESULT] + _CUT
+
 
 def _matches_json_type(value, json_type: str) -> bool:
     """True if a Python value fits the declared JSON Schema type.

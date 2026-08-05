@@ -18,6 +18,10 @@ finish-args:
   - --talk-name=org.freedesktop.secrets
   # Notifications.
   - --talk-name=org.freedesktop.Notifications
+  # Running commands on the host: stdio MCP servers, and run_command.
+  # This is a genuine escape from the sandbox -- with it, ZeroOS can run any
+  # command as the user. The confirm dialog is what makes it survivable.
+  - --talk-name=org.freedesktop.Flatpak
 
 modules:
   - name: pulseaudio-utils

@@ -12,8 +12,8 @@ def tools(tmp_path, monkeypatch):
     return registry.build(gate)
 
 
-def test_the_catalog_has_exactly_eighteen_tools(tools):
-    assert len(tools) == 18
+def test_the_catalog_has_exactly_nineteen_tools(tools):
+    assert len(tools) == 19
 
 
 def test_the_memory_tools_are_registered(tools):
@@ -55,12 +55,6 @@ def test_every_path_shaped_argument_is_declared_sandboxed(tools):
                 assert argument in declared, (
                     f"{tool.name}'s {argument!r} looks like a path but is not in PATH_ARGUMENTS"
                 )
-
-
-def test_no_tool_name_hints_at_shell_access(tools):
-    forbidden = {"shell", "exec", "command", "sudo", "delete", "remove"}
-    for tool in tools:
-        assert not (forbidden & set(tool.name.split("_")))
 
 
 def test_every_tool_has_a_description_for_the_model(tools):
