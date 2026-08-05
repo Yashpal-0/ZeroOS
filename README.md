@@ -23,8 +23,9 @@ OpenRouter and costs a fraction of a penny per request; see
 
 ## What it remembers
 
-ZeroOS can keep up to 950 short facts about you — where your documents live, how
-you like to be addressed — and puts them in front of the model on every turn.
+ZeroOS remembers as many short facts about you as you care to approve — where your
+documents live, how you like to be addressed. It is told the ten most relevant each
+time it answers, and you can pin the ones it must never be without.
 
 Nothing is remembered without you ticking a box that shows the full text first,
 and nothing is forgotten without one either. Facts are the model's proposal; the
@@ -63,6 +64,6 @@ filenames.
 | Input | Text only |
 | Reach | Local machine only — no accounts, no server |
 | Actions | 18 curated functions. No shell. No permanent delete. |
-| Memory | Up to 950 facts, 1000 characters each, every one approved by hand |
+| Memory | Unlimited facts, 1000 characters each, every one approved by hand; ten sent per reply |
 | Platform | Linux desktop (GNOME-first), shipped as a Flatpak |
 | Built with | Python, GTK4 + libadwaita, `qwen/qwen3.7-flash` via OpenRouter |
