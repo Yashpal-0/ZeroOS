@@ -282,3 +282,36 @@ def test_watch_clipboard_mirrors_a_later_external_change(monkeypatch):
     clipboard._text = "copied in a text editor"
     clipboard.handlers["changed"](clipboard)
     assert system.read_clipboard() == "copied in a text editor"
+
+
+def test_streaming_tokens_then_done_produces_spoken_and_details(monkeypatch):
+    """Tokens stream into a label; 'done' finalises via split() into spoken +
+    a details expander when the reply carries a --- marker."""
+    chat, Gtk = _window(monkeypatch)
+
+    # Stream tokens that build a reply containing the marker.
+    for token in ["Four files moved.\n", "---\n", "a.pdf b.pdf"]:
+        chat._handle_event("token", token)
+
+    # Finalise: _show_reply applies split() to the full reply.
+    chat._show_reply("Four files moved.\n---\na.pdf b.pdf")
+
+    labels = [w for w in _walk(chat) if isinstance(w, Gtk.Label)]
+    texts = [l.get_label() for l in labels]
+    assert any("Four files moved" in t for t in texts), "spoken must be visible"
+    expanders = [w for w in _walk(chat) if isinstance(w, Gtk.Expander)]
+    assert len(expanders) >= 1, "details must be collapsed under an expander"
+
+
+def test_streaming_tool_event_appends_a_dimmed_row(monkeypatch):
+    """A 'tools' event appends a progress row and resets the streaming bubble."""
+    chat, Gtk = _window(monkeypatch)
+
+    chat._handle_event("token", "Checking ")
+    chat._handle_event("tools", ["Move a.pdf to the trash"])
+
+    labels = [w for w in _walk(chat) if isinstance(w, Gtk.Label)]
+    texts = [l.get_label() for l in labels]
+    assert any("Checking" in t for t in texts), "streamed text must remain"
+    assert any("Move a.pdf" in t for t in texts), "the tools row must appear"
+    assert chat._streaming_label is None, "tools must reset the streaming bubble"
