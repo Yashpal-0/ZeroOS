@@ -51,3 +51,43 @@ def test_a_tool_call_split_across_chunks_is_reassembled(home, monkeypatch):
     assert "a.pdf" in row_text or "trash_file" in row_text, (
         "the fragmented tool call must reach the gate as a complete call"
     )
+
+
+def test_events_fire_in_order_across_a_two_step_turn(home):
+    """text → tools → (gate) → final text → done."""
+    target = str(home / "Downloads" / "a.pdf")
+    step1 = FakeStreamResponse([
+        FakeChunk(FakeDelta(content="Let me check ")),
+        FakeChunk(FakeDelta(content="Downloads.")),
+        FakeChunk(FakeDelta(tool_calls=[
+            FakeChunkToolCall(index=0, id="1", name="trash_file",
+                              arguments=json.dumps({"path": target})),
+        ])),
+    ])
+    step2 = FakeStreamResponse([
+        FakeChunk(FakeDelta(content="Done — removed one, Sir.")),
+    ])
+    session, _, _ = build_session([step1, step2], [True])
+
+    events = []
+    session.send("what's in downloads", on_event=lambda k, p: events.append((k, p)))
+
+    kinds = [k for k, _ in events]
+    assert kinds == ["token", "token", "tools", "token", "done"], (
+        f"events must fire text → tools → text → done, got {kinds}"
+    )
+    tools_payload = [p for k, p in events if k == "tools"][0]
+    assert isinstance(tools_payload, list)
+    assert any("a.pdf" in s or "trash_file" in s for s in tools_payload)
+    done_payload = [p for k, p in events if k == "done"][0]
+    assert done_payload == "Done — removed one, Sir."
+
+
+def test_on_event_none_behaves_identically_to_before(home):
+    """No callback, no events — send returns the final reply as ever."""
+    responses = [
+        FakeStreamResponse([FakeChunk(FakeDelta(content="Done."))]),
+    ]
+    session, _, _ = build_session(responses, [])
+    reply = session.send("hello")
+    assert reply == "Done."
