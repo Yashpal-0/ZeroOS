@@ -11,9 +11,17 @@ them would let text inside a file author a memory proposal -- on every
 turn, not once. Only user messages and assistant prose go out.
 """
 
+import re
+
 from zeroos.platform import memory
 
 MAX_CANDIDATES = 2
+
+# Shorter than this is a fragment, not a fact -- "ok", "yes", "the CV". The
+# real store collected "[Empty response]" (window.py's placeholder for a
+# blank reply) because the pass read a rendering artefact as prose.
+MIN_CHARS = 15
+_PLACEHOLDER = re.compile(r"^\[.*\]$")
 
 # The model's own ceiling, not a budget. MODEL is a reasoning model: it thinks
 # before it answers, and a cap it cannot finish thinking inside returns
@@ -29,11 +37,16 @@ MAX_TOKENS = 65536
 INSTRUCTION = (
     "Read this conversation and list any lasting facts about the user worth "
     "remembering for future conversations: where things live, how they work, "
-    "what they prefer. One per line, in the user's own words, one sentence "
-    "each. List nothing at all if there is nothing lasting -- most "
-    "conversations have none. Never list anything the user did not say "
-    "themselves, and never list the contents of a file. Reply with the lines "
-    "only, no preamble and no numbering."
+    "what they prefer. Write each fact in the third person, using the user's "
+    'name if you know it -- "Yash keeps tax PDFs in Documents", never "I keep '
+    'tax PDFs in Documents". You will be shown these lines later as facts '
+    "about the user, so a line beginning with I would read as a fact about "
+    "you instead. One per line, one sentence each. Every line must state a "
+    "fact about the user; if you are unsure, leave it out. List nothing at "
+    "all if there is nothing lasting -- most conversations have none. Never "
+    "list anything the user did not say themselves, and never list the "
+    "contents of a file. Reply with the lines only, no preamble and no "
+    "numbering."
 )
 
 
@@ -75,11 +88,20 @@ def candidates(client, messages: list[dict]) -> list[str]:
         ).choices[0].message.content or ""
 
         found = []
+        # ponytail: exact match only. A paraphrase of a stored fact still gets
+        # through; the fix is asking the model to consolidate with remember +
+        # forget in one approved batch, not a similarity threshold that would
+        # silently discard facts the user wanted.
+        stored = {fact["text"] for fact in memory.load()}
         for line in reply.splitlines():
             text = memory.normalise(line)
             # Dropped, not truncated: truncating changes what a fact says, and
             # the user would be approving text the model did not write.
             if not text or len(text) > memory.MAX_CHARS:
+                continue
+            if len(text) < MIN_CHARS or _PLACEHOLDER.match(text):
+                continue
+            if text in stored:
                 continue
             found.append(text)
             if len(found) == MAX_CANDIDATES:
