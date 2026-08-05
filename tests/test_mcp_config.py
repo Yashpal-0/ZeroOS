@@ -87,7 +87,9 @@ def test_an_entry_with_neither_is_skipped():
     assert config.load()[0] == []
 
 
-@pytest.mark.parametrize("name", ["Filesystem", "file_system", "file system", "", "a__b", "café"])
+@pytest.mark.parametrize(
+    "name", ["Filesystem", "file_system", "file system", "", "a__b", "café", "good\n", "good\r"]
+)
 def test_a_bad_name_is_skipped(name):
     """A name containing __ would let two servers produce one tool name."""
     write({"servers": [{"name": name, "url": "https://example.test"}]})
@@ -128,6 +130,32 @@ def test_a_non_dict_env_is_dropped_rather_than_skipping_the_entry():
 def test_a_command_with_non_string_elements_is_skipped():
     write({"servers": [{"name": "a", "command": ["npx", 7]}]})
     assert config.load()[0] == []
+
+
+def test_a_deeply_nested_file_is_rejected_without_raising():
+    nested = "[" * (config.MAX_DEPTH + 1) + "]" * (config.MAX_DEPTH + 1)
+    config.path().parent.mkdir(parents=True, exist_ok=True)
+    config.path().write_text(nested, encoding="utf-8")
+    assert config.load() == ([], [])
+
+
+def test_a_file_nested_well_under_the_limit_still_loads():
+    write({"servers": [{"name": "a", "url": "https://example.test", "headers": {"x": "y"}}]})
+    valid, skipped = config.load()
+    assert skipped == []
+    assert valid[0]["name"] == "a"
+
+
+def test_duplicate_names_the_first_wins_and_the_second_is_skipped():
+    write({"servers": [
+        {"name": "dup", "url": "https://example.test/a"},
+        {"name": "dup", "url": "https://example.test/b"},
+    ]})
+    valid, skipped = config.load()
+    assert [entry["name"] for entry in valid] == ["dup"]
+    assert valid[0]["url"] == "https://example.test/a"
+    assert len(skipped) == 1
+    assert "duplicate" in skipped[0]["reason"]
 
 
 def test_save_round_trips():

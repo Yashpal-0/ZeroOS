@@ -20,6 +20,32 @@ from zeroos.platform import paths
 
 NAME_PATTERN = re.compile(r"^[a-z0-9-]+$")
 
+# A JSON parser recurses once per nesting level. A ~200KB file nested 50,000
+# levels deep blows the C stack before json.loads ever returns, and a caught
+# RecursionError can leave the interpreter's stack in a state better not
+# built on -- so depth is checked before the parse is attempted, not after.
+# A real servers.json nests three deep; nothing legitimate approaches 100.
+MAX_DEPTH = 100
+
+
+def _too_deep(text: str) -> bool:
+    """True if brackets in text ever nest past MAX_DEPTH.
+
+    This is a character scan, not a parse: it does not know about string
+    literals, so a header value containing more than MAX_DEPTH unescaped
+    '[' or '{' characters would be rejected too. That is fine -- rejecting
+    such a file with a clear reason is the correct outcome either way.
+    """
+    depth = 0
+    for char in text:
+        if char in "[{":
+            depth += 1
+            if depth > MAX_DEPTH:
+                return True
+        elif char in "]}":
+            depth -= 1
+    return False
+
 
 def path() -> Path:
     return paths.config_dir() / "servers.json"
@@ -34,8 +60,11 @@ def load() -> tuple[list[dict], list[dict]]:
     appears and no way to find out why.
     """
     try:
-        data = json.loads(path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        text = path().read_text(encoding="utf-8")
+        if _too_deep(text):
+            return [], []
+        data = json.loads(text)
+    except (OSError, ValueError, RecursionError):
         return [], []
     if not isinstance(data, dict):
         return [], []
@@ -45,17 +74,24 @@ def load() -> tuple[list[dict], list[dict]]:
 
     valid: list[dict] = []
     skipped: list[dict] = []
+    seen_names: set[str] = set()
     for entry in entries:
         if not isinstance(entry, dict):
             skipped.append({"name": "(unnamed)", "reason": "not an object"})
             continue
         reason = _rejection(entry)
+        if not reason and entry["name"] in seen_names:
+            # First occurrence wins: the least surprising rule for a file a
+            # user edited by hand, and it is what keeps two servers from
+            # producing tool names that collide as mcp__<name>__<tool>.
+            reason = "duplicate name; a server named this already appears earlier"
         if reason:
             name = entry.get("name")
             skipped.append(
                 {"name": name if isinstance(name, str) and name else "(unnamed)", "reason": reason}
             )
             continue
+        seen_names.add(entry["name"])
         valid.append(_clean(entry))
     return valid, skipped
 
@@ -63,7 +99,9 @@ def load() -> tuple[list[dict], list[dict]]:
 def _rejection(entry: dict) -> str:
     """The reason this entry cannot be used, or "" if it can."""
     name = entry.get("name")
-    if not isinstance(name, str) or not NAME_PATTERN.match(name):
+    if not isinstance(name, str) or not NAME_PATTERN.fullmatch(name):
+        # fullmatch, not match: "$" alone matches just before a trailing "\n",
+        # which would let a name like "good\n" slip through.
         # Load-bearing, not tidiness: name becomes the middle segment of
         # mcp__<server>__<tool>, which is the string tier_of prefix-matches
         # and the string the consent row displays. A name containing __ would
