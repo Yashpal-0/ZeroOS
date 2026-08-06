@@ -19,7 +19,7 @@ import gi
 
 gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
-from gi.repository import Adw, Gtk  # noqa: E402
+from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from zeroos.agent import history  # noqa: E402
 from zeroos.mcp import config as mcp_config  # noqa: E402
@@ -177,6 +177,10 @@ def _pin_row(dialog, fact_id: str, state: bool) -> bool:
     """
     if state and _pinned_count() >= memory.MAX_INJECTED:
         _pin_limit_reached(dialog)
+        # state-set's True blocks the state change but does not undo the active
+        # property the click already set. Rebuild from the store after this
+        # handler returns; doing it here would destroy the switch handling us.
+        GLib.idle_add(_redraw, dialog)
         return True
     set_pinned(fact_id, state)
     return False
@@ -323,8 +327,10 @@ def _add_server_dialog(dialog) -> None:
     name = Adw.EntryRow(title="Name")
     command = Adw.EntryRow(title="Command (e.g. npx -y @mcp/server)")
     url = Adw.EntryRow(title="URL (https://…)")
+    fields = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
     for entry_row in (name, command, url):
-        alert.set_extra_child(entry_row)
+        fields.append(entry_row)
+    alert.set_extra_child(fields)
 
     def _on_response(_a, response):
         if response != "add":

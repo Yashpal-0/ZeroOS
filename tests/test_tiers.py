@@ -90,6 +90,11 @@ def test_an_unknown_non_mcp_name_still_raises():
         tier_of("definitely_not_a_tool")
 
 
+def test_a_non_string_name_fails_closed_with_key_error():
+    with pytest.raises(KeyError):
+        tier_of(5)
+
+
 def test_a_name_that_only_resembles_the_prefix_still_raises():
     with pytest.raises(KeyError):
         tier_of("mcp_filesystem_read")

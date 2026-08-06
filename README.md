@@ -7,8 +7,7 @@ Type what you want in plain language. ZeroOS finds files, moves them, opens apps
 manages your clipboard — several at a time — and asks before it changes anything.
 
 It is not an operating system. It is a desktop app with an agent loop, a permission
-gate, and eighteen audited actions. It has no shell access and no way to permanently
-delete a file.
+gate, and nineteen audited actions. Every action is assigned a permission tier.
 
 ## Install
 
@@ -74,7 +73,7 @@ server offers runs unasked.
 |---|---|
 | Input | Text only |
 | Reach | Local machine only — no accounts, no server |
-|| Actions | 19 curated functions. No shell. No permanent delete. |
+| Actions | 19 curated functions, all permission-tiered. |
 | Memory | Unlimited facts, 1000 characters each, every one approved by hand; ten sent per reply |
 | Platform | Linux desktop (GNOME-first), shipped as a Flatpak |
 | Built with | Python, GTK4 + libadwaita, `qwen/qwen3.7-flash` via OpenRouter |

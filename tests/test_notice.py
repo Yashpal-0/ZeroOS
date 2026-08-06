@@ -145,6 +145,14 @@ def test_a_bracketed_placeholder_is_never_offered():
     assert notice.candidates(client, TRANSCRIPT) == ["Yash keeps tax PDFs in Documents"]
 
 
+def test_a_short_bracketed_placeholder_is_dropped_as_a_placeholder(monkeypatch):
+    # Lower the independent length floor so this fails if placeholder filtering
+    # disappears. Without that, "[ok]" passes for the wrong reason.
+    monkeypatch.setattr(notice, "MIN_CHARS", 1)
+    client = FakeClient(reply="[ok]\nYash keeps tax PDFs in Documents")
+    assert notice.candidates(client, TRANSCRIPT) == ["Yash keeps tax PDFs in Documents"]
+
+
 def test_a_line_too_short_to_be_a_fact_is_dropped():
     client = FakeClient(reply="ok\nYash keeps tax PDFs in Documents")
     assert notice.candidates(client, TRANSCRIPT) == ["Yash keeps tax PDFs in Documents"]

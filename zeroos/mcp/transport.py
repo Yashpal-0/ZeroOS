@@ -256,7 +256,7 @@ class HttpTransport:
             # local/network failure, not a JSON-RPC one, so it's always
             # this message. The re-raise above keeps this clause from
             # relabelling this method's own TransportError as this one.
-            raise TransportError(f"Could not reach the server: {error}") from error
+            raise TransportError(f"Could not reach the server ({type(error).__name__}).") from error
 
     def stderr_tail(self) -> list[str]:
         """Nothing to show: a remote server's logs are the remote server's.

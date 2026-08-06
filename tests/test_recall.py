@@ -4,7 +4,7 @@ import gi
 
 gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
-from gi.repository import Adw, Gtk  # noqa: E402
+from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 import pytest  # noqa: E402
 
@@ -307,6 +307,49 @@ def test_adding_a_server_writes_it_and_remounts(monkeypatch):
     assert reloaded == [True]
 
 
+def test_add_server_dialog_shows_all_three_fields_together(monkeypatch):
+    created = []
+
+    class FakeEntryRow:
+        def __init__(self, title):
+            self.title = title
+
+        def get_text(self):
+            return ""
+
+    class FakeBox:
+        def __init__(self, **kwargs):
+            self.children = []
+
+        def append(self, child):
+            self.children.append(child)
+
+    class FakeAlertDialog:
+        def __init__(self, **kwargs):
+            self.child = None
+            created.append(self)
+
+        def set_extra_child(self, child):
+            self.child = child
+
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: None
+
+    monkeypatch.setattr(recall.Adw, "EntryRow", FakeEntryRow)
+    monkeypatch.setattr(recall.Adw, "AlertDialog", FakeAlertDialog)
+    monkeypatch.setattr(recall.Gtk, "Box", FakeBox)
+
+    recall._add_server_dialog(object())
+
+    child = created[0].child
+    assert isinstance(child, FakeBox)
+    assert [field.title for field in child.children] == [
+        "Name",
+        "Command (e.g. npx -y @mcp/server)",
+        "URL (https://…)",
+    ]
+
+
 def test_the_group_survives_an_unreadable_config(monkeypatch):
     config.path().parent.mkdir(parents=True, exist_ok=True)
     config.path().write_text("{not json", encoding="utf-8")
@@ -354,7 +397,7 @@ def test_flipping_the_switch_pins_the_fact():
     assert memory.text_of(fact_id) == "Yash keeps tax PDFs in Documents"
 
 
-def test_the_eleventh_pin_is_refused_rather_than_dropped_at_injection():
+def test_the_eleventh_pin_is_refused_and_the_switch_turns_back_off():
     # Pins fill the ten injection slots first. Allowing an eleventh would
     # discard one of the user's explicit choices without telling them.
     for n in range(memory.MAX_INJECTED):
@@ -363,7 +406,12 @@ def test_the_eleventh_pin_is_refused_rather_than_dropped_at_injection():
     dialog = recall.build(None)
     shown(dialog)
 
-    assert recall._pin_row(dialog, extra, True) is True
+    switch_for(dialog, "Yash keeps tax PDFs in Documents").set_active(True)
+    context = GLib.MainContext.default()
+    while context.pending():
+        context.iteration(False)
+
+    assert switch_for(dialog, "Yash keeps tax PDFs in Documents").get_active() is False
     assert memory.text_of(extra) == "Yash keeps tax PDFs in Documents"
     assert len([f for f in memory.load() if f.get("pinned")]) == memory.MAX_INJECTED
 

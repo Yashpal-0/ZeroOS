@@ -16,13 +16,15 @@ from zeroos.mcp import config, remote
 from zeroos.mcp.transport import HttpTransport, StdioTransport, TransportError
 
 PROTOCOL_VERSION = "2025-06-18"
-CLIENT_INFO = {"name": "ZeroOS", "version": "0.3.0"}
+CLIENT_INFO = {"name": "ZeroOS", "version": "0.4.0"}
 
 _lock = threading.Lock()
 _tools: list = []
 _status: list[dict] = []
 _links: list = []
 _generation = 0
+_epoch = 0
+_shutdown = False
 
 
 def load(gate) -> None:
@@ -31,6 +33,11 @@ def load(gate) -> None:
     A server that fails is named in the pane with its error, not silently
     dropped, and the application starts anyway.
     """
+    global _epoch
+    with _lock:
+        _epoch += 1
+        epoch = _epoch
+
     valid, skipped = config.load()
 
     tools: list = []
@@ -44,40 +51,53 @@ def load(gate) -> None:
         link = None
         try:
             link = _connect(entry)
-            links.append(link)
+            _handshake(link)
             advertised = link.send("tools/list", {}).get("tools") or []
+            if not isinstance(advertised, list):
+                advertised = []
             mounted = remote.build(entry["name"], link, advertised, gate)
             tools.extend(mounted)
+            links.append(link)
             status.append(
                 {"name": entry["name"], "state": "connected", "tools": len(mounted),
                  "error": "", "stderr": []}
             )
         except TransportError as error:
             status.append(_failure(entry["name"], str(error), link))
+            if link is not None:
+                _close(link)
         except Exception as error:
             # Nothing about a misbehaving server may reach the caller: load()
             # runs at startup and from the pane, and both would take the window
             # with them.
             status.append(_failure(entry["name"], f"That didn't work — {error}", link))
+            if link is not None:
+                _close(link)
 
-    _replace(tools, status, links)
+    _replace(tools, status, links, epoch)
 
 
 def _connect(entry: dict):
-    link = (
+    return (
         StdioTransport(entry["command"], entry.get("env"))
         if "command" in entry
         else HttpTransport(entry["url"], entry.get("headers"))
     )
+
+
+def _handshake(link) -> None:
     link.send(
         "initialize",
         {"protocolVersion": PROTOCOL_VERSION, "capabilities": {}, "clientInfo": CLIENT_INFO},
     )
     link.notify("notifications/initialized", {})
-    return link
 
 
 def _failure(name: str, error: str, link) -> dict:
+    try:
+        stderr = link.stderr_tail() if link is not None else []
+    except Exception:
+        stderr = []
     return {
         "name": name,
         "state": "failed",
@@ -86,16 +106,19 @@ def _failure(name: str, error: str, link) -> dict:
         # The pane shows this beneath a failed stdio server. It is usually the
         # only place the real reason appears -- "command not found" arrives on
         # stderr, not as a protocol error.
-        "stderr": link.stderr_tail() if link is not None else [],
+        "stderr": stderr,
     }
 
 
-def _replace(tools: list, status: list, links: list) -> None:
+def _replace(tools: list, status: list, links: list, epoch: int) -> None:
     global _tools, _status, _links, _generation
     with _lock:
-        previous, _links = _links, links
-        _tools, _status = tools, status
-        _generation += 1
+        if _shutdown or epoch != _epoch:
+            previous = links
+        else:
+            previous, _links = _links, links
+            _tools, _status = tools, status
+            _generation += 1
     for link in previous:
         _close(link)
 
@@ -118,10 +141,12 @@ def generation() -> int:
 
 
 def close_all() -> None:
-    global _tools, _status, _links
+    global _tools, _status, _links, _generation, _shutdown
     with _lock:
         previous, _links = _links, []
         _tools, _status = [], []
+        _generation += 1
+        _shutdown = True
     for link in previous:
         _close(link)
 

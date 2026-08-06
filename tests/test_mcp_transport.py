@@ -350,6 +350,24 @@ def test_a_network_failure_becomes_a_transport_error(monkeypatch):
         link.send("tools/list", {})
 
 
+def test_a_rejected_header_value_does_not_leak_into_the_error(monkeypatch):
+    marker = "invented-placeholder"
+    header = f"Bearer {marker}\n"
+
+    def rejects(self, method, url, **kwargs):
+        value = kwargs["headers"]["Authorization"].encode()
+        raise transport.httpx.LocalProtocolError(f"Illegal header value {value!r}")
+
+    monkeypatch.setattr(transport.httpx.Client, "stream", rejects)
+    link = transport.HttpTransport(
+        "https://example.test/mcp", {"Authorization": header}
+    )
+    with pytest.raises(transport.TransportError) as caught:
+        link.send("tools/list", {})
+
+    assert marker not in str(caught.value)
+
+
 def test_an_http_timeout_says_so(monkeypatch):
     """Also the regression guard for the broad `except Exception` added in
     round 2: TimeoutException must still be caught by its own clause and

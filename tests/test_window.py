@@ -55,7 +55,7 @@ class _StubSession:
     def __init__(self, *args, **kwargs):
         self.closed = 0
         self.summaries = []
-        self._gate = None  # window.py's mount.load thread reads this
+        self.gate = None  # window.py shares this with mount.load and recall
 
     def close(self, summary=True):
         self.closed += 1
@@ -71,6 +71,7 @@ def _window(monkeypatch):
 
     Adw.init()
     monkeypatch.setattr(window, "Session", _StubSession)
+    monkeypatch.setattr(window.mount, "load", lambda gate: None)
     app = Adw.Application(application_id="io.zerostic.ZeroOS.Test")
     return window.ChatWindow(application=app, api_key="test"), Gtk
 

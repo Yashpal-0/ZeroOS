@@ -12,6 +12,9 @@ import gi
 gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib  # noqa: E402
 
+from zeroos.platform import paths
+
+
 
 def move(source: Path, destination: Path) -> None:
     if destination.exists():
@@ -35,13 +38,17 @@ def trash(path: Path) -> None:
     try:
         Gio.File.new_for_path(str(path)).trash(None)
     except GLib.Error as error:
-        # GLib.Error inherits from RuntimeError, not OSError, so it would sail
-        # straight through the `except (OSError, ValueError)` in Task 7's
-        # trash_file — the one catalog tool without a bare Exception catch. A
-        # failed trash would then escape the catalog boundary and kill the turn.
-        # Converting here keeps this module's stated contract true for every
-        # caller instead of making each one remember a GIO-specific case.
-        raise OSError(str(error)) from error
+        try:
+            trash_dir = paths.home() / ".local" / "share" / "Trash" / "files"
+            trash_dir.mkdir(parents=True, exist_ok=True)
+            target = trash_dir / path.name
+            if target.exists():
+                import time
+                target = trash_dir / f"{path.stem}_{int(time.monotonic())}{path.suffix}"
+            shutil.move(str(path), str(target))
+        except Exception:
+            raise OSError(str(error)) from error
+
 
 
 def make_folder(path: Path) -> None:

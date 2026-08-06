@@ -125,7 +125,7 @@ mechanical answers that.
 Specified in
 [`docs/superpowers/specs/2026-08-04-zeroos-v021-memory-design.md`](superpowers/specs/2026-08-04-zeroos-v021-memory-design.md).
 
-### v0.2.2 — memory that scales, and behaves
+### v0.2.2 — memory that scales, and behaves *(shipped)*
 
 **Built.** Facts are retrieved rather than dumped: an in-memory SQLite FTS5 index,
 built per search from the same `memory.jsonl`, ranks facts by BM25 against what the

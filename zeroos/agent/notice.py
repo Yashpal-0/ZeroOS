@@ -97,7 +97,7 @@ def candidates(client, messages: list[dict]) -> list[str]:
             text = memory.normalise(line)
             # Dropped, not truncated: truncating changes what a fact says, and
             # the user would be approving text the model did not write.
-            if not text or len(text) > memory.MAX_CHARS:
+            if len(text) > memory.MAX_CHARS:
                 continue
             if len(text) < MIN_CHARS or _PLACEHOLDER.match(text):
                 continue

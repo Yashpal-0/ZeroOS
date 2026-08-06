@@ -14,8 +14,6 @@ from zeroos.mcp.transport import TransportError
 from zeroos.policy.gate import Verdict
 from zeroos.policy.tiers import MCP_PREFIX
 
-_EMPTY_SCHEMA = {"type": "object", "properties": {}}
-
 
 class RemoteTool:
     def __init__(self, server: str, bare_name: str, description: str, schema: dict, link, gate):
@@ -38,10 +36,10 @@ class RemoteTool:
 
         A server being down must not end the agent loop.
         """
-        verdict, message = self._gate.decide(self.name, arguments)
-        if verdict is not Verdict.ALLOW:
-            return message
         try:
+            verdict, message = self._gate.decide(self.name, arguments)
+            if verdict is not Verdict.ALLOW:
+                return message
             # The bare name the server advertised, not the composed one. The
             # composition exists for ZeroOS's tier table and dialog; the server
             # has never heard of it.
@@ -99,7 +97,7 @@ def build(server: str, link, advertised: list, gate) -> list:
                 server,
                 bare_name,
                 memory.normalise(entry.get("description", "")),
-                schema if isinstance(schema, dict) else dict(_EMPTY_SCHEMA),
+                schema if isinstance(schema, dict) else {"type": "object", "properties": {}},
                 link,
                 gate,
             )

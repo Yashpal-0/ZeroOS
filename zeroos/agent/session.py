@@ -128,6 +128,11 @@ class Session:
         # runs once, and its job is the session as a whole.
         self._noticed = 0
 
+    @property
+    def gate(self) -> Gate:
+        """The consent gate shared by this session's built-in and mounted tools."""
+        return self._gate
+
     def send(self, text: str, on_event=None) -> str:
         """Run one turn to completion and return the model's final text.
 

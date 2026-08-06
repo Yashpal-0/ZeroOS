@@ -126,6 +126,11 @@ def build_session(responses, answers, ask=None):
     return session, asked, client
 
 
+def test_the_shared_gate_has_a_public_accessor():
+    session, _, _ = build_session([], [])
+    assert session.gate is session._gate
+
+
 def test_mixed_tier_turn_asks_once_and_runs_auto_tools(home):
     responses = [
         FakeMessage(tool_calls=[

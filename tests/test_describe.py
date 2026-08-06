@@ -195,6 +195,18 @@ def test_control_characters_in_a_command_are_stripped():
     assert "ls[2Jrm -rf ~" in row
 
 
+@pytest.mark.parametrize(
+    ("tool", "arguments"),
+    [
+        ("run_command", {"command": "open /tmp/\u202egpj.txt"}),
+        ("mcp__s__t", {"path": "/tmp/\u202egpj.txt"}),
+    ],
+)
+def test_format_controls_cannot_reorder_a_consent_row(tool, arguments):
+    row = describe.describe_batch([(tool, arguments)])[0]
+    assert "\u202e" not in row
+
+
 def test_a_missing_command_argument_does_not_raise():
     assert isinstance(describe.describe_batch([("run_command", {})])[0], str)
 
@@ -229,3 +241,14 @@ def test_non_ascii_mcp_arguments_are_not_escaped():
 def test_unserialisable_mcp_arguments_do_not_raise():
     row = describe.describe_batch([("mcp__s__t", {"when": object()})])[0]
     assert isinstance(row, str)
+
+
+def test_deeply_nested_mcp_arguments_do_not_raise_or_recurse_in_the_fallback():
+    arguments = {}
+    cursor = arguments
+    for _ in range(50_000):
+        cursor["a"] = {}
+        cursor = cursor["a"]
+
+    row = describe.describe_batch([("mcp__s__t", arguments)])[0]
+    assert row == "mcp__s__t <dict>"

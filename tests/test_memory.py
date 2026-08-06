@@ -243,6 +243,16 @@ def test_a_pinned_fact_comes_back_for_a_query_it_does_not_match():
     assert found[0]["id"] == pinned
 
 
+def test_a_hand_edited_store_with_too_many_pins_keeps_the_first_ten():
+    ids = []
+    for n in range(memory.MAX_INJECTED + 5):
+        fact_id = memory.add(f"Yash owns thing number {n}")
+        memory.set_pinned(fact_id, True)
+        ids.append(fact_id)
+
+    assert [fact["id"] for fact in memory.search("unrelated")] == ids[:memory.MAX_INJECTED]
+
+
 def test_a_pinned_fact_is_never_listed_twice():
     pinned = memory.add("Yash keeps tax PDFs in Documents")
     memory.set_pinned(pinned, True)

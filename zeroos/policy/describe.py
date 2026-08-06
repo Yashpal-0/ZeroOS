@@ -74,8 +74,8 @@ def _single(tool: str, args: dict) -> str:
         # the one showing exactly what is about to be sent.
         try:
             rendered = json.dumps(args, ensure_ascii=False)
-        except (TypeError, ValueError):
-            rendered = str(args)
+        except (TypeError, ValueError, RecursionError):
+            rendered = f"<{type(args).__name__}>"
         # Capped, unlike run_command above: a server's arguments can be an
         # arbitrarily large blob, and one call must not make the dialog
         # unreadable.

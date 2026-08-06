@@ -18,6 +18,7 @@ import os
 import re
 import secrets
 import sqlite3
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -56,7 +57,11 @@ def strip_control(text: str) -> str:
     this half on its own. A command that reads as one line in the dialog
     but runs as three is a row that lies.
     """
-    return str(text).translate(_STRIP)
+    return "".join(
+        character
+        for character in str(text).translate(_STRIP)
+        if unicodedata.category(character) != "Cf"
+    )
 
 
 def normalise(text: str) -> str:

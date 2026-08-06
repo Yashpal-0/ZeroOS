@@ -88,7 +88,7 @@ class ChatWindow(Adw.ApplicationWindow):
         # of no window at all. The window presents immediately with builtins;
         # mounted tools join at the start of the first turn after this returns.
         threading.Thread(
-            target=lambda: mount.load(self._session._gate), daemon=True
+            target=lambda: mount.load(self._session.gate), daemon=True
         ).start()
         self._busy = False
         self._closing = False
@@ -111,7 +111,7 @@ class ChatWindow(Adw.ApplicationWindow):
 
         header = Adw.HeaderBar()
         knows = Gtk.Button(icon_name="view-list-symbolic", tooltip_text="What ZeroOS knows")
-        knows.connect("clicked", lambda _b: recall.build(self, self._session._gate).present(self))
+        knows.connect("clicked", lambda _b: recall.build(self, self._session.gate).present(self))
         header.pack_end(knows)
 
         layout = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)

@@ -57,6 +57,17 @@ def test_a_missing_input_schema_becomes_an_empty_object_schema():
     assert tool.input_schema == {"type": "object", "properties": {}}
 
 
+def test_missing_input_schemas_do_not_share_mutable_properties():
+    tools = remote.build(
+        "s",
+        FakeLink(),
+        [{"name": "first"}, {"name": "second"}],
+        allowing(),
+    )
+    tools[0].input_schema["properties"]["x"] = {"type": "string"}
+    assert tools[1].input_schema == {"type": "object", "properties": {}}
+
+
 def test_the_bare_name_is_what_reaches_the_server():
     link = FakeLink()
     tool = one(link=link)
@@ -99,10 +110,28 @@ def test_any_other_exception_returns_the_shared_fallback():
     assert one(link=link).call({"path": "/x"}) == _UNEXPECTED
 
 
+def test_a_gate_failure_returns_the_shared_fallback_without_calling_the_server():
+    class BrokenGate:
+        def decide(self, name, arguments):
+            raise RuntimeError("dialog exploded")
+
+    link = FakeLink()
+    assert one(link=link, gate=BrokenGate()).call({"path": "/x"}) == _UNEXPECTED
+    assert link.sent == []
+
+
 def test_a_result_shaped_wrongly_does_not_raise():
-    for bad in [{}, {"content": "not a list"}, {"content": [None]}, {"content": [{"type": "text"}]}]:
-        link = FakeLink(result=bad)
-        assert isinstance(one(link=link).call({"path": "/x"}), str)
+    for bad in [
+        {},
+        {"content": "not a list"},
+        {"content": [None]},
+        {"content": [{"type": "text"}]},
+        None,
+        [],
+        "text",
+        [1, 2],
+    ]:
+        assert isinstance(remote._text_of(bad), str)
 
 
 def test_the_result_is_capped_with_an_explicit_marker():

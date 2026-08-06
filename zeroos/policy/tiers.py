@@ -61,6 +61,8 @@ def tier_of(name: str) -> Tier:
     composes it from a name config.py validated, out of a file the model cannot
     write, so a server cannot name itself into or out of a tier.
     """
+    if not isinstance(name, str):
+        raise KeyError(name)
     if name.startswith(MCP_PREFIX):
         return Tier.CONFIRM
     return TIERS[name]
